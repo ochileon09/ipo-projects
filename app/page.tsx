@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase/client";
 export default function Home() {
   const [connection, setConnection] = useState("연결 확인 중");
   const [notice, setNotice] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     async function checkConnection() {
@@ -15,9 +16,34 @@ export default function Home() {
     void checkConnection();
   }, []);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setNotice("설문 화면 뼈대가 정상 작동합니다. 데이터 저장은 다음 차시에 연결합니다.");
+    setIsSaving(true);
+    setNotice("");
+
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const { error } = await supabase.from("student_surveys").insert({
+      student_id: String(data.get("studentId") ?? "").trim(),
+      student_name: String(data.get("name") ?? "").trim(),
+      grade: Number(data.get("grade")),
+      wake_time: data.get("wakeTime"),
+      sleep_time: data.get("sleepTime"),
+      tidiness: Number(data.get("tidiness")),
+      noise_sensitivity: Number(data.get("noise")),
+      preferred_temperature: Number(data.get("temperature")),
+      roommate_preference: String(data.get("roommatePreference") ?? "").trim() || null,
+      accessibility_needs: String(data.get("accessibility") ?? "").trim() || null,
+    });
+
+    setIsSaving(false);
+    if (error) {
+      setNotice(`저장 실패: ${error.message}`);
+      return;
+    }
+
+    setNotice("설문 응답이 Supabase에 안전하게 저장되었습니다.");
+    form.reset();
   }
 
   return (
@@ -38,34 +64,34 @@ export default function Home() {
         <section className="form-section">
           <div className="section-heading"><span>01</span><div><h2>학생 기본 정보</h2><p>배정 결과를 구분하기 위한 기본 정보입니다.</p></div></div>
           <div className="grid three-columns">
-            <label>학번<input name="studentId" placeholder="예: 2602" /></label>
-            <label>이름<input name="name" placeholder="이름 입력" /></label>
-            <label>학년<select name="grade" defaultValue=""><option value="" disabled>선택</option><option>1학년</option><option>2학년</option><option>3학년</option></select></label>
+            <label>학번<input name="studentId" placeholder="예: 2602" required maxLength={12} /></label>
+            <label>이름<input name="name" placeholder="이름 입력" required maxLength={30} /></label>
+            <label>학년<select name="grade" defaultValue="" required><option value="" disabled>선택</option><option value="1">1학년</option><option value="2">2학년</option><option value="3">3학년</option></select></label>
           </div>
         </section>
 
         <section className="form-section">
           <div className="section-heading"><span>02</span><div><h2>생활 리듬</h2><p>평소 기숙사에서의 시간을 기준으로 입력하세요.</p></div></div>
           <div className="grid two-columns">
-            <label>평균 기상 시간<input type="time" name="wakeTime" defaultValue="07:00" /></label>
-            <label>평균 취침 시간<input type="time" name="sleepTime" defaultValue="23:30" /></label>
+            <label>평균 기상 시간<input type="time" name="wakeTime" defaultValue="07:00" required /></label>
+            <label>평균 취침 시간<input type="time" name="sleepTime" defaultValue="23:30" required /></label>
           </div>
         </section>
 
         <section className="form-section">
           <div className="section-heading"><span>03</span><div><h2>생활 습관과 선호</h2><p>각 항목에서 자신과 가장 가까운 정도를 선택하세요.</p></div></div>
           <div className="grid two-columns">
-            <label>정리정돈 습관<select name="tidiness" defaultValue=""><option value="" disabled>선택</option><option>매우 깔끔하게 유지</option><option>보통</option><option>크게 신경 쓰지 않음</option></select></label>
-            <label>소음 민감도<select name="noise" defaultValue=""><option value="" disabled>선택</option><option>작은 소리에도 민감함</option><option>보통</option><option>소음에 둔감함</option></select></label>
-            <label>선호 실내 온도<input type="number" name="temperature" min="18" max="28" placeholder="예: 23" /></label>
-            <label>룸메이트 희망 사항<input name="roommatePreference" placeholder="선택 입력" /></label>
+            <label>정리정돈 습관<select name="tidiness" defaultValue="" required><option value="" disabled>선택</option><option value="5">매우 깔끔하게 유지</option><option value="3">보통</option><option value="1">크게 신경 쓰지 않음</option></select></label>
+            <label>소음 민감도<select name="noise" defaultValue="" required><option value="" disabled>선택</option><option value="5">작은 소리에도 민감함</option><option value="3">보통</option><option value="1">소음에 둔감함</option></select></label>
+            <label>선호 실내 온도<input type="number" name="temperature" min="18" max="28" placeholder="예: 23" required /></label>
+            <label>룸메이트 희망 사항<input name="roommatePreference" placeholder="선택 입력" maxLength={200} /></label>
           </div>
-          <label className="wide-label">방 위치 배려가 필요한 신체적 사유<textarea name="accessibility" rows={3} placeholder="없으면 비워 두어도 됩니다." /></label>
+          <label className="wide-label">방 위치 배려가 필요한 신체적 사유<textarea name="accessibility" rows={3} placeholder="없으면 비워 두어도 됩니다." maxLength={500} /></label>
         </section>
 
         <div className="form-footer">
-          <p>{notice || "현재는 화면 구조를 확인하는 단계이며, 입력 내용은 아직 저장되지 않습니다."}</p>
-          <button type="submit">입력 화면 확인</button>
+          <p>{notice || "필수 항목을 입력하고 제출하면 Supabase 데이터베이스에 저장됩니다."}</p>
+          <button type="submit" disabled={isSaving}>{isSaving ? "저장 중..." : "설문 제출"}</button>
         </div>
       </form>
     </main>

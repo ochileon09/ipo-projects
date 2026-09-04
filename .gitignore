@@ -3,6 +3,9 @@
 
 # Common local and build artifacts
 node_modules/
+.pnpm-store/
+.next/
+out/
 .env
 .env.*
 !.env.example

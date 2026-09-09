@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
+import { SiteNav } from "@/components/site-nav";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "정보과학 프로젝트",
-  description: "Supabase와 연결된 정보과학 프로젝트",
+  title: "기숙사 룸메이트 배정",
+  description: "생활 습관을 반영한 기숙사 룸메이트 배정 시스템",
 };
 
 export default function RootLayout({
@@ -11,7 +12,7 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="ko">
-      <body>{children}</body>
+      <body><SiteNav />{children}</body>
     </html>
   );
 }

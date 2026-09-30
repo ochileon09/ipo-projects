@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 
@@ -18,8 +17,6 @@ export default function StudentApplicationPage() {
   const [connection, setConnection] = useState("연결 확인 중");
   const [notice, setNotice] = useState("");
   const [isSaving, setIsSaving] = useState(false);
-  const [isSeeding, setIsSeeding] = useState(false);
-  const [testResult, setTestResult] = useState("");
   const [studentId, setStudentId] = useState("");
   const [temperature, setTemperature] = useState(22);
   const grade = /^[1-3]/.test(studentId) ? `${studentId.charAt(0)}학년` : "학번 입력 시 자동 표시";
@@ -64,22 +61,6 @@ export default function StudentApplicationPage() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  async function createTestStudents() {
-    if (isSeeding) return;
-    setIsSeeding(true);
-    setTestResult("");
-    const { data, error } = await supabase.rpc("seed_test_student_surveys");
-    setIsSeeding(false);
-    if (error) {
-      setTestResult(`테스트 데이터 생성 실패: ${error.message}`);
-      return;
-    }
-    const insertedCount = Number(data ?? 0);
-    setTestResult(insertedCount > 0
-      ? `가상 학생 ${insertedCount}명이 저장되었습니다.`
-      : "가상 학생 8명이 이미 저장되어 있습니다.");
-  }
-
   return <main>
     <header className="hero">
       <div className="hero-copy"><p className="eyebrow">학생 신청용</p><h1>기숙사 생활 습관<br />설문 신청</h1>
@@ -88,12 +69,6 @@ export default function StudentApplicationPage() {
     </header>
 
     {notice && <p className={`notice ${notice.startsWith("저장 실패") || notice.startsWith("이름") ? "error" : "success"}`} role="status">{notice}</p>}
-
-    <section className="test-panel" aria-labelledby="test-mode-title">
-      <div><p className="eyebrow">DEMO TOOL</p><h2 id="test-mode-title">2인실 테스트 모드</h2><p>가상 학생 8명, 총 4개 호실 분량의 설문을 한 번에 DB에 저장합니다.</p></div>
-      <div className="test-actions"><button type="button" className="secondary-button" onClick={() => void createTestStudents()} disabled={isSeeding}>{isSeeding ? "생성 중..." : "가상 설문 8명 생성"}</button><Link href="/admin">관리자 화면에서 확인</Link></div>
-      {testResult && <p className={testResult.includes("실패") ? "test-result error-text" : "test-result"} role="status">{testResult}</p>}
-    </section>
 
     <form className="survey" onSubmit={handleSubmit}>
       <section className="form-section">

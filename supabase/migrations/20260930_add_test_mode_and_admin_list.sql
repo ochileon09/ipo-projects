@@ -70,5 +70,5 @@ $$;
 
 revoke all on function public.seed_test_student_surveys() from public;
 revoke all on function public.get_student_surveys_for_admin() from public;
-grant execute on function public.seed_test_student_surveys() to anon, authenticated;
-grant execute on function public.get_student_surveys_for_admin() to anon, authenticated;
+grant execute on function public.seed_test_student_surveys() to authenticated;
+grant execute on function public.get_student_surveys_for_admin() to authenticated;

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 
 type SurveyRow = {
@@ -16,8 +16,8 @@ type FloorInfo = { floor: number; rooms: RoomInfo[] };
 const ROOMS_PER_FLOOR = 4;
 
 export default function AdminPage() {
-  const [authChecked, setAuthChecked] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [adminKey, setAdminKey] = useState("");
   const [authError, setAuthError] = useState("");
   const [surveys, setSurveys] = useState<SurveyRow[]>([]);
   const [totalCapacity, setTotalCapacity] = useState(8);
@@ -28,11 +28,11 @@ export default function AdminPage() {
   const [settingsNotice, setSettingsNotice] = useState("");
   const [isSeeding, setIsSeeding] = useState(false);
 
-  const loadDashboard = useCallback(async () => {
+  const loadDashboard = useCallback(async (schoolKey: string) => {
     setIsLoading(true); setErrorMessage("");
     const [surveyResult, settingsResult] = await Promise.all([
-      supabase.rpc("get_student_surveys_for_admin"),
-      supabase.rpc("get_dormitory_settings"),
+      supabase.rpc("get_student_surveys_for_admin_by_key", { p_admin_key: schoolKey }),
+      supabase.rpc("get_dormitory_settings_by_key", { p_admin_key: schoolKey }),
     ]);
     if (surveyResult.error || settingsResult.error) {
       setErrorMessage(`DB 조회 실패: ${(surveyResult.error ?? settingsResult.error)?.message}`);
@@ -47,47 +47,50 @@ export default function AdminPage() {
     setIsLoading(false);
   }, []);
 
-  useEffect(() => {
-    void supabase.auth.getSession().then(({ data }) => {
-      setIsAuthenticated(Boolean(data.session));
-      setAuthChecked(true);
-    });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setIsAuthenticated(Boolean(session));
-      setAuthChecked(true);
-    });
-    return () => listener.subscription.unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    if (isAuthenticated) void loadDashboard();
-  }, [isAuthenticated, loadDashboard]);
-
   async function signIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setAuthError("");
     const data = new FormData(event.currentTarget);
-    const { error } = await supabase.auth.signInWithPassword({
-      email: String(data.get("email") ?? "").trim(),
-      password: String(data.get("password") ?? ""),
+    const schoolKey = String(data.get("schoolKey") ?? "").trim();
+    const { data: isValid, error } = await supabase.rpc("verify_school_admin_key", {
+      p_admin_key: schoolKey,
     });
-    if (error) setAuthError("관리자 이메일 또는 비밀번호를 확인해 주세요.");
+    if (error || !isValid) {
+      setAuthError("학교 인증키를 확인해 주세요.");
+      return;
+    }
+    setAdminKey(schoolKey);
+    setIsAuthenticated(true);
+    await loadDashboard(schoolKey);
+  }
+
+  function signOut() {
+    setIsAuthenticated(false);
+    setAdminKey("");
+    setSurveys([]);
+    setAuthError("");
+    setSettingsNotice("");
+    setErrorMessage("");
   }
 
   async function createTestStudents() {
     if (isSeeding) return;
     setIsSeeding(true); setSettingsNotice(""); setErrorMessage("");
-    const { data, error } = await supabase.rpc("seed_test_student_surveys", { p_count: totalCapacity });
+    const { data, error } = await supabase.rpc("seed_test_student_surveys_by_key", {
+      p_admin_key: adminKey,
+      p_count: totalCapacity,
+    });
     setIsSeeding(false);
     if (error) { setErrorMessage(`테스트 데이터 생성 실패: ${error.message}`); return; }
     const insertedCount = Number(data ?? 0);
     setSettingsNotice(insertedCount > 0 ? `가상 학생 ${insertedCount}명이 저장되었습니다.` : `가상 학생 ${totalCapacity}명이 이미 저장되어 있습니다.`);
-    await loadDashboard();
+    await loadDashboard(adminKey);
   }
 
   async function saveSettings(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsSavingSettings(true); setSettingsNotice(""); setErrorMessage("");
-    const { data, error } = await supabase.rpc("set_dormitory_settings", {
+    const { data, error } = await supabase.rpc("set_dormitory_settings_by_key", {
+      p_admin_key: adminKey,
       p_total_capacity: totalCapacity,
       p_room_capacity: roomCapacity,
     });
@@ -127,16 +130,13 @@ export default function AdminPage() {
     }).reverse();
   }, [assignedStudents, roomCapacity, totalRooms]);
 
-  if (!authChecked) return <main className="admin-login-page"><div className="admin-login-card"><strong>관리자 인증 확인 중...</strong></div></main>;
-
   if (!isAuthenticated) return <main className="admin-login-page">
     <form className="admin-login-card" onSubmit={signIn}>
-      <p className="eyebrow">AUTHORIZED STAFF ONLY</p><h1>관리자 로그인</h1>
-      <p>학생 생활 정보와 기숙사 배정 지도는 인증된 관리자만 확인할 수 있습니다.</p>
-      <label><span>관리자 이메일</span><input type="email" name="email" autoComplete="username" required /></label>
-      <label><span>비밀번호</span><input type="password" name="password" autoComplete="current-password" required /></label>
+      <p className="eyebrow">SCHOOL STAFF ONLY</p><h1>학교 관리자 인증</h1>
+      <p>학교에서 안내받은 인증키를 입력하면 기숙사 배정 관리 화면을 확인할 수 있습니다.</p>
+      <label><span>학교 인증키</span><input type="password" name="schoolKey" inputMode="numeric" autoComplete="off" placeholder="인증키 입력" required /></label>
       {authError && <p className="login-error" role="alert">{authError}</p>}
-      <button type="submit">로그인</button>
+      <button type="submit">인증하기</button>
     </form>
   </main>;
 
@@ -144,7 +144,7 @@ export default function AdminPage() {
     <div className="page-kicker">사감 관리용</div>
     <div className="admin-title-row">
       <div><h1>기숙사 배정 지도</h1><p className="page-lead">정원과 방 인원을 설정하고, 층별 호실의 사용 학생을 확인합니다.</p></div>
-      <div className="admin-actions"><button type="button" className="secondary-button" onClick={() => void supabase.auth.signOut()}>로그아웃</button><button type="button" className="refresh-button" onClick={() => void loadDashboard()} disabled={isLoading}>{isLoading ? "불러오는 중..." : "DB 새로고침"}</button></div>
+      <div className="admin-actions"><button type="button" className="secondary-button" onClick={signOut}>로그아웃</button><button type="button" className="refresh-button" onClick={() => void loadDashboard(adminKey)} disabled={isLoading}>{isLoading ? "불러오는 중..." : "DB 새로고침"}</button></div>
     </div>
 
     {errorMessage && <p className="notice error" role="alert">{errorMessage}</p>}

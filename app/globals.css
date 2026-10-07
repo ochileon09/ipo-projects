@@ -394,3 +394,97 @@ body { background: var(--shell-bg); color: var(--shell-text); }
   .admin-login-page { padding: 28px 16px; }
   .admin-login-card { padding: 26px 22px; }
 }
+
+/* School-specific matching and four-floor dormitory map. */
+.matching-policy { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 28px; }
+.matching-policy > div { display: grid; gap: 8px; min-height: 92px; padding: 18px; border: 1px solid var(--shell-border); border-radius: 13px; background: var(--shell-panel); }
+.matching-policy span { color: var(--shell-accent); font-size: 10px; font-weight: 900; letter-spacing: .08em; }
+.matching-policy strong { color: var(--shell-text); font-size: 13px; line-height: 1.5; }
+.four-summary { grid-template-columns: repeat(4, 1fr); }
+.default-badge { display: inline-block; padding: 5px 8px; border-radius: 999px; background: #e7ebea; color: #617069; font-size: 10px; font-weight: 900; }
+.expanded-table { min-width: 1540px; }
+
+.school-dorm-map { width: min(1500px, 100%); }
+.map-heading p { margin: 7px 0 0; color: var(--shell-muted); font-size: 12px; }
+.grade-legend { display: flex; gap: 14px; color: var(--shell-muted); font-size: 11px; font-weight: 800; }
+.grade-legend span { display: flex; align-items: center; gap: 6px; }
+.grade-legend i { width: 9px; height: 9px; border-radius: 50%; }
+.grade1-dot { background: #9b7de1; }
+.grade2-dot { background: #55b7eb; }
+.grade3-dot { background: #d69a55; }
+.capacity-panel { grid-template-columns: minmax(260px, .8fr) minmax(620px, 1.2fr); }
+.capacity-form { grid-template-columns: repeat(3, 112px) minmax(170px, 1fr) auto; }
+.calculated-capacity { display: grid; align-self: stretch; align-content: center; gap: 3px; padding: 9px 12px; border: 1px solid var(--shell-border); border-radius: 10px; background: var(--shell-panel-soft); }
+.calculated-capacity span { color: var(--shell-muted); font-size: 9px; font-weight: 800; }
+.calculated-capacity strong { color: var(--shell-accent); font-size: 18px; }
+.calculated-capacity small { color: var(--shell-muted); font-size: 8px; }
+.building-block + .building-block { margin-top: 36px; padding-top: 30px; border-top: 2px solid var(--shell-border); }
+.building-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin: 10px 0 4px; }
+.building-heading > div { display: flex; align-items: center; gap: 10px; }
+.building-heading strong { font-size: 22px; }
+.building-heading span { padding: 5px 8px; border-radius: 999px; background: #3a3219; color: #efd370; font-size: 8px; font-weight: 900; }
+.building-heading p { margin: 0; color: var(--shell-muted); font-size: 11px; }
+.school-floor { margin-top: 20px; overflow: hidden; border: 1px solid var(--shell-border); border-radius: 15px; background: var(--shell-panel); }
+.school-floor > header { display: flex; align-items: center; justify-content: space-between; padding: 17px 20px; border-bottom: 1px solid var(--shell-border); background: var(--shell-panel-soft); }
+.school-floor > header div { display: flex; align-items: baseline; gap: 12px; }
+.school-floor > header strong { color: var(--shell-accent); font-size: 25px; }
+.school-floor > header span, .school-floor > header small { color: var(--shell-muted); font-size: 11px; font-weight: 800; }
+.facility-strip { display: grid; grid-template-columns: .7fr 1.5fr 1fr 1.5fr .7fr; gap: 8px; align-items: center; padding: 10px 14px; border-bottom: 1px dashed var(--shell-border); color: var(--shell-muted); font-size: 9px; text-align: center; }
+.facility-strip b { padding: 7px; border-radius: 7px; background: var(--shell-accent-soft); color: var(--shell-accent); font-size: 9px; }
+.wing-labels { display: grid; grid-template-columns: 1fr 76px 1fr; gap: 12px; padding: 14px 14px 0; text-align: center; }
+.wing-labels span { padding: 8px; border-radius: 8px; font-size: 10px; font-weight: 900; }
+.wing-labels .grade-2 { background: rgba(63, 164, 216, .14); color: #55b7eb; }
+.wing-labels .grade-3 { background: rgba(205, 133, 52, .14); color: #d69a55; }
+.wing-labels .grade-1 { background: rgba(138, 103, 214, .14); color: #9b7de1; }
+.wing-labels i { align-self: center; color: var(--shell-muted); font-size: 8px; font-style: normal; }
+.school-room-layout { display: grid; grid-template-columns: minmax(0, 1fr) 76px minmax(0, 1fr); gap: 12px; padding: 14px; }
+.room-wing { display: grid; grid-template-columns: repeat(6, minmax(118px, 1fr)); gap: 8px; align-content: start; }
+.central-corridor { display: flex; align-items: center; justify-content: space-around; flex-direction: column; min-height: 100%; padding: 12px 5px; border: 1px dashed var(--shell-border); border-radius: 9px; color: var(--shell-muted); font-size: 8px; writing-mode: vertical-rl; }
+.central-corridor b { color: var(--shell-text); font-size: 9px; }
+.school-room-card { min-width: 0; overflow: hidden; border: 1px solid var(--shell-border); border-radius: 10px; background: var(--shell-panel-soft); }
+.school-room-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 9px; border-bottom: 1px solid var(--shell-border); }
+.school-room-header strong { font-size: 11px; }
+.school-room-header span { color: var(--shell-muted); font-size: 8px; font-weight: 900; }
+.compact-bed-list { display: grid; gap: 4px; padding: 6px; }
+.compact-bed { display: grid; grid-template-columns: 17px minmax(0, 1fr); align-items: center; gap: 5px; min-height: 34px; padding: 5px; border: 1px dashed var(--shell-border); border-radius: 7px; color: var(--shell-muted); }
+.compact-bed.occupied { border-style: solid; border-color: color-mix(in srgb, var(--shell-accent) 38%, var(--shell-border)); background: color-mix(in srgb, var(--shell-accent-soft) 65%, transparent); }
+.compact-bed i { display: grid; place-items: center; width: 17px; height: 17px; border-radius: 5px; background: var(--shell-panel); color: var(--shell-muted); font-size: 7px; font-style: normal; font-weight: 900; }
+.compact-bed div { min-width: 0; }
+.compact-bed b, .compact-bed small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compact-bed b { color: var(--shell-text); font-size: 8px; }
+.compact-bed small { margin-top: 2px; color: var(--shell-muted); font-size: 6px; }
+.compact-bed em { font-size: 7px; font-style: normal; }
+.match-score { display: block; padding: 0 7px 7px; color: var(--shell-accent); font-size: 7px; font-weight: 800; text-align: right; }
+
+html[data-theme="dark"] .default-badge { background: #303738; color: #b3bfba; }
+
+@media (max-width: 1320px) {
+  .capacity-panel { grid-template-columns: 1fr; }
+  .capacity-form { grid-template-columns: repeat(3, 1fr); }
+  .calculated-capacity { grid-column: 1 / 3; }
+  .room-wing { grid-template-columns: repeat(3, minmax(118px, 1fr)); }
+}
+@media (max-width: 980px) {
+  .matching-policy, .four-summary { grid-template-columns: repeat(2, 1fr); }
+  .capacity-form { grid-template-columns: 1fr 1fr; }
+  .calculated-capacity { grid-column: 1 / -1; }
+  .capacity-form button { grid-column: 1 / -1; }
+  .school-room-layout { grid-template-columns: 1fr; }
+  .central-corridor { min-height: 40px; flex-direction: row; writing-mode: horizontal-tb; }
+  .wing-labels { grid-template-columns: 1fr 1fr; }
+  .wing-labels i { display: none; }
+  .facility-strip { grid-template-columns: 1fr 1fr; }
+  .facility-strip > span { display: none; }
+  .facility-strip b:nth-of-type(2) { grid-column: 1 / -1; }
+}
+@media (max-width: 660px) {
+  .matching-policy, .four-summary { grid-template-columns: 1fr; }
+  .capacity-form { grid-template-columns: 1fr; }
+  .calculated-capacity, .capacity-form button { grid-column: auto; }
+  .building-heading { align-items: flex-start; flex-direction: column; }
+  .room-wing { grid-template-columns: repeat(2, minmax(115px, 1fr)); }
+  .school-dorm-map { padding: 16px; }
+  .school-room-layout { padding: 9px; }
+  .facility-strip { grid-template-columns: 1fr; }
+  .facility-strip b:nth-of-type(2) { grid-column: auto; }
+}

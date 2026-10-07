@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { SiteNav } from "@/components/site-nav";
+import { SiteShell } from "@/components/site-nav";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -13,9 +13,9 @@ export default function RootLayout({
   return (
     <html lang="ko" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: `(function(){try{var saved=localStorage.getItem('roomfit-theme');var theme=saved||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.dataset.theme=theme;}catch(e){document.documentElement.dataset.theme='light';}})();` }} />
+        <script dangerouslySetInnerHTML={{ __html: `(function(){try{var saved=localStorage.getItem('roomfit-theme');document.documentElement.dataset.theme=saved||'dark';}catch(e){document.documentElement.dataset.theme='dark';}})();` }} />
       </head>
-      <body><SiteNav />{children}</body>
+      <body><SiteShell>{children}</SiteShell></body>
     </html>
   );
 }

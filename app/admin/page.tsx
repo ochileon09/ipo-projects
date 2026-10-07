@@ -14,6 +14,7 @@ type RoomInfo = { number: string; students: SurveyRow[] };
 type FloorInfo = { floor: number; rooms: RoomInfo[] };
 
 const ROOMS_PER_FLOOR = 4;
+const TEMPORARY_ADMIN_KEY = "12345";
 
 export default function AdminPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -51,11 +52,8 @@ export default function AdminPage() {
     event.preventDefault(); setAuthError("");
     const data = new FormData(event.currentTarget);
     const schoolKey = String(data.get("schoolKey") ?? "").trim();
-    const { data: isValid, error } = await supabase.rpc("verify_school_admin_key", {
-      p_admin_key: schoolKey,
-    });
-    if (error || !isValid) {
-      setAuthError("학교 인증키를 확인해 주세요.");
+    if (schoolKey !== TEMPORARY_ADMIN_KEY) {
+      setAuthError("관리자 인증키를 확인해 주세요.");
       return;
     }
     setAdminKey(schoolKey);
@@ -132,11 +130,13 @@ export default function AdminPage() {
 
   if (!isAuthenticated) return <main className="admin-login-page">
     <form className="admin-login-card" onSubmit={signIn}>
-      <p className="eyebrow">SCHOOL STAFF ONLY</p><h1>학교 관리자 인증</h1>
-      <p>학교에서 안내받은 인증키를 입력하면 기숙사 배정 관리 화면을 확인할 수 있습니다.</p>
-      <label><span>학교 인증키</span><input type="password" name="schoolKey" inputMode="numeric" autoComplete="off" placeholder="인증키 입력" required /></label>
+      <div className="login-symbol" aria-hidden="true">⌁</div>
+      <p className="eyebrow">MANAGER ACCESS</p><h1>관리자 인증</h1>
+      <p>기숙사 배정 관리 화면은 관리자 인증키 확인 후 이용할 수 있습니다.</p>
+      <label><span>관리자 인증키</span><input type="password" name="schoolKey" autoComplete="off" placeholder="인증키를 입력하세요" required /></label>
       {authError && <p className="login-error" role="alert">{authError}</p>}
       <button type="submit">인증하기</button>
+      <small className="login-helper">현재 임시 인증키를 사용합니다. 발급·변경 방식은 추후 관리자 정책에 맞춰 연결합니다.</small>
     </form>
   </main>;
 

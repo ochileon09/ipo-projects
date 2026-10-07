@@ -167,12 +167,22 @@ export default function AdminPage() {
   const studentsPerGrade = classCount * studentsPerClass;
 
   const rosterStudents = useMemo(() => {
-    const latestSurveyByStudent = new Map<string, SurveyRow>();
+    const preferredSurveyByStudent = new Map<string, SurveyRow>();
     [...surveys]
       .filter((survey) => isSchoolStudentId(survey.student_id, classCount, studentsPerClass))
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-      .forEach((survey) => { if (!latestSurveyByStudent.has(survey.student_id)) latestSurveyByStudent.set(survey.student_id, survey); });
-    return createDefaultRoster(classCount, studentsPerClass).map((defaultStudent) => latestSurveyByStudent.get(defaultStudent.student_id) ?? defaultStudent);
+      .sort((a, b) => {
+        if (a.is_test !== b.is_test) return a.is_test ? 1 : -1;
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      })
+      .forEach((survey) => {
+        if (!preferredSurveyByStudent.has(survey.student_id)) {
+          preferredSurveyByStudent.set(survey.student_id, {
+            ...survey,
+            grade: Number(survey.student_id.charAt(0)),
+          });
+        }
+      });
+    return createDefaultRoster(classCount, studentsPerClass).map((defaultStudent) => preferredSurveyByStudent.get(defaultStudent.student_id) ?? defaultStudent);
   }, [classCount, studentsPerClass, surveys]);
 
   const grade1Rooms = useMemo(() => matchRoommates(rosterStudents.filter((student) => student.grade === 1), roomCapacity), [roomCapacity, rosterStudents]);
@@ -265,6 +275,7 @@ export default function AdminPage() {
     {settingsNotice && <p className="notice success" role="status">{settingsNotice}</p>}
 
     <section className="matching-policy" aria-label="배정 기준">
+      <div><span>응답 우선순위</span><strong>실제 응답은 테스트 응답보다 항상 먼저 배정</strong></div>
       <div><span>학년 분리</span><strong>1·2·3학년은 서로 같은 방에 배정하지 않음</strong></div>
       <div><span>유사도 기준</span><strong>취침·기상·청결·소음 등은 비슷할수록 우선</strong></div>
       <div><span>씻는 시간</span><strong>시간이 겹치지 않을수록 우선</strong></div>
@@ -288,7 +299,7 @@ export default function AdminPage() {
 
     <section className="summary-grid four-summary" aria-label="기숙사 배정 요약">
       <article><span>학교 명단</span><strong>{schoolRosterSize}명</strong><small>학년당 {classCount}반 × {studentsPerClass}명</small></article>
-      <article><span>실제 / 테스트 응답</span><strong>{actualCount} / {testCount}명</strong><small>가장 최근 응답 기준</small></article>
+      <article><span>실제 / 테스트 응답</span><strong>{actualCount} / {testCount}명</strong><small>실제 응답 최우선 · 이후 최신 응답</small></article>
       <article><span>기본값 적용</span><strong>{defaultCount}명</strong><small>00:30 · 07:30 · 씻기 07:40</small></article>
       <article><span>배정 / 대기</span><strong>{assignedCount} / {waitingCount}명</strong><small>{roomCapacity}인실 · 학년당 {Math.ceil(studentsPerGrade / roomCapacity)}개 방</small></article>
     </section>

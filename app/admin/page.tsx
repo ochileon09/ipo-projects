@@ -14,7 +14,6 @@ type RoomInfo = { number: string; students: SurveyRow[] };
 type FloorInfo = { floor: number; rooms: RoomInfo[] };
 
 const ROOMS_PER_FLOOR = 4;
-const TEMPORARY_ADMIN_KEY = "12345";
 
 export default function AdminPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -52,7 +51,10 @@ export default function AdminPage() {
     event.preventDefault(); setAuthError("");
     const data = new FormData(event.currentTarget);
     const schoolKey = String(data.get("schoolKey") ?? "").trim();
-    if (schoolKey !== TEMPORARY_ADMIN_KEY) {
+    const { data: isValid, error } = await supabase.rpc("verify_school_admin_key", {
+      p_admin_key: schoolKey,
+    });
+    if (error || !isValid) {
       setAuthError("관리자 인증키를 확인해 주세요.");
       return;
     }

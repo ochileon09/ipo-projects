@@ -19,11 +19,16 @@ export function createDefaultRoster(classCount: number, studentsPerClass: number
 
 export function selectRoster(surveys: SurveyRow[], classCount: number, studentsPerClass: number, testEnabled: boolean, includeDefaults: boolean) {
   const selected = new Map<string, SurveyRow>();
-  [...surveys].filter(survey => testEnabled || !survey.is_test).sort((a, b) => Number(a.is_test) - Number(b.is_test) || Date.parse(b.created_at) - Date.parse(a.created_at) || a.id.localeCompare(b.id)).forEach(survey => {
+  const received = new Map<string, SurveyRow>();
+  [...surveys].sort((a, b) => Number(a.is_test) - Number(b.is_test) || Date.parse(b.created_at) - Date.parse(a.created_at) || a.id.localeCompare(b.id)).forEach(survey => {
     const studentId = survey.student_id.trim();
-    if (!selected.has(studentId)) selected.set(studentId, { ...survey, student_id: studentId, grade: Number(studentId[0]), is_default: false });
+    const normalized = { ...survey, student_id: studentId, student_name: survey.student_name.trim(), grade: Number(studentId[0]), is_default: false };
+    const identity = JSON.stringify([studentId, normalized.student_name]);
+    if (!survey.is_test && !received.has(identity)) received.set(identity, normalized);
+    if ((testEnabled || !survey.is_test) && !selected.has(studentId)) selected.set(studentId, normalized);
   });
-  const outsideRoster = [...selected.values()].filter(survey => !survey.is_test && !isSchoolStudentId(survey.student_id, classCount, studentsPerClass));
+  const receivedStudents = [...received.values()];
+  const outsideRoster = receivedStudents.filter(survey => !isSchoolStudentId(survey.student_id, classCount, studentsPerClass));
   const allStudents = createDefaultRoster(classCount, studentsPerClass).map(student => selected.get(student.student_id) ?? student);
-  return { allStudents, activeStudents: allStudents.filter(student => includeDefaults || !student.is_default), outsideRoster };
+  return { allStudents, activeStudents: allStudents.filter(student => includeDefaults || !student.is_default), outsideRoster, receivedStudents };
 }

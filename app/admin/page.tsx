@@ -68,7 +68,6 @@ export default function AdminPage() {
       const management = managementResult.data?.[0];
       if (management) {
         setSavedLayout(previous => JSON.stringify(previous) === JSON.stringify(management.layout) ? previous : management.layout as DormLayout | null);
-        setTestEnabled(management.test_enabled);
         setIncludeDefaults(management.include_defaults);
       }
       const settings = settingsResult?.data?.[0];
@@ -98,12 +97,12 @@ export default function AdminPage() {
     setIsSigningIn(false);
     if (error) { setAuthError("인증 서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요."); return; }
     if (!isValid) { setAuthError("관리자 인증키를 확인해 주세요."); return; }
-    setAdminKey(schoolKey); setIsAuthenticated(true); await loadDashboard(schoolKey, true);
+    setTestEnabled(false); setAdminKey(schoolKey); setIsAuthenticated(true); await loadDashboard(schoolKey, true);
   }
 
   function signOut() {
     requestVersion.current += 1;
-    setIsAuthenticated(false); setAdminKey(""); setSurveys([]); setAuthError(""); setSettingsNotice(""); setErrorMessage(""); setDraftLayout(null);
+    setIsAuthenticated(false); setTestEnabled(false); setAdminKey(""); setSurveys([]); setAuthError(""); setSettingsNotice(""); setErrorMessage(""); setDraftLayout(null);
     previousAssignments.current = new Map(); setMovedCount(0);
   }
 
@@ -112,7 +111,7 @@ export default function AdminPage() {
     setIsChangingMode(true); setErrorMessage(""); setSettingsNotice("");
     const { data, error } = await supabase.rpc("seed_test_student_surveys_by_key", { p_admin_key: adminKey });
     if (error) setErrorMessage("테스트 데이터 생성 실패: " + error.message);
-    else { await loadDashboard(adminKey); setSettingsNotice("실제 응답은 보존하고 테스트 학생 " + Number(data ?? 0) + "명을 생성했습니다."); }
+    else { setTestEnabled(true); await loadDashboard(adminKey); setSettingsNotice("실제 응답은 보존하고 테스트 학생 " + Number(data ?? 0) + "명을 생성했습니다."); }
     setIsChangingMode(false);
   }
 
@@ -121,7 +120,7 @@ export default function AdminPage() {
     setIsChangingMode(true); setErrorMessage(""); setSettingsNotice("");
     const { data, error } = await supabase.rpc("set_dormitory_operation_by_key", { p_admin_key: adminKey, p_test_enabled: nextTest, p_include_defaults: nextDefaults });
     if (error) setErrorMessage("운영 모드 변경 실패: " + error.message);
-    else { await loadDashboard(adminKey); setSettingsNotice(nextTest ? "기본값 포함 설정을 변경했습니다." : "실제 운영 모드입니다. 테스트 학생 " + Number(data ?? 0) + "명을 제거했으며 실제 응답은 보존했습니다."); }
+    else { setTestEnabled(nextTest); await loadDashboard(adminKey); setSettingsNotice(nextTest ? "기본값 포함 설정을 변경했습니다." : "실제 운영 모드입니다. 테스트 학생 " + Number(data ?? 0) + "명을 제거했으며 실제 응답은 보존했습니다."); }
     setIsChangingMode(false);
   }
 
@@ -151,12 +150,15 @@ export default function AdminPage() {
   const roomsById = useMemo(() => new Map(allocation.rooms.map(room => [room.id, room])), [allocation.rooms]);
   const actualCount = roster.allStudents.filter(student => !student.is_default && !student.is_test).length;
   const testCount = roster.allStudents.filter(student => student.is_test).length;
+  const storedTestCount = surveys.filter(student => student.is_test).length;
   const missingCount = roster.allStudents.filter(student => student.is_default).length;
   const assignedCount = allocation.rooms.reduce((sum, room) => sum + room.students.length, 0);
   const totalBeds = allocation.rooms.reduce((sum, room) => sum + room.capacity, 0);
   const defaultCount = roster.activeStudents.filter(student => student.is_default).length;
   const gradeBeds = [1, 2, 3].map(grade => allocation.rooms.filter(room => room.grade === grade).reduce((sum, room) => sum + room.capacity, 0));
   const waitingActual = allocation.waiting.filter(student => !student.is_default && !student.is_test);
+  const actualAssignments = useMemo(() => new Map(allocation.rooms.flatMap(room => room.students.filter(student => !student.is_default && !student.is_test).map(student => [student.id, { building: effectiveLayout.find(building => room.id.startsWith(building.id + "/"))?.name, room: room.number }] as const))), [allocation.rooms, effectiveLayout]);
+  const eligibleResponseIds = new Set(roster.allStudents.filter(student => !student.is_default && !student.is_test).map(student => student.id));
 
   useEffect(() => {
     const next = new Map<string, string>();
@@ -194,11 +196,23 @@ export default function AdminPage() {
 
     <DormitoryEditor value={draftLayout ?? effectiveLayout} onChange={setDraftLayout} onSave={() => void saveLayout(draftLayout ?? effectiveLayout)} onAuto={() => void saveLayout(null)} busy={isSavingLayout} dirty={draftLayout !== null} />
 
-    <section className="test-panel admin-test-panel" aria-labelledby="test-mode-title"><div><p className="eyebrow">OPERATION MODE</p><h2 id="test-mode-title">{testEnabled ? "테스트 모드 사용 중" : "실제 운영 모드"}</h2><p>실제 운영은 응답한 학생부터 배정합니다. 테스트 종료 시 생성된 가상 학생만 제거하고 실제 응답은 그대로 유지합니다.</p><label className="check-label defaults-option"><input type="checkbox" checked={includeDefaults} disabled={isChangingMode} onChange={event => void changeOperation(testEnabled, event.target.checked)} />미응답 학생도 기본값으로 배정 (취침 00:30 · 기상 07:30 · 씻기 07:40)</label></div><div className="test-actions"><button className="secondary-button" onClick={() => void createTestStudents()} disabled={isChangingMode || isLoading}>{isChangingMode ? "변경 중..." : testEnabled ? "테스트 학생 다시 생성" : "테스트 학생 생성"}</button>{testEnabled && <button className="danger-outline" onClick={() => void changeOperation(false, includeDefaults)} disabled={isChangingMode || isLoading}>테스트 종료 · 가상 학생 제거</button>}</div></section>
+    <section className="test-panel admin-test-panel" aria-labelledby="test-mode-title"><div><p className="eyebrow">OPERATION MODE</p><h2 id="test-mode-title">{testEnabled ? "테스트 모드 사용 중" : "실제 운영 모드"}</h2><p>관리자 페이지를 새로 열면 테스트 모드는 꺼집니다. 테스트 학생 생성 버튼을 누른 경우에만 가상 학생을 배정에 포함합니다.</p>{!testEnabled && storedTestCount > 0 && <p>저장된 가상 학생 {storedTestCount}명은 현재 배정에서 제외되어 있습니다. 제거 버튼으로 DB에서도 정리할 수 있습니다.</p>}<label className="check-label defaults-option"><input type="checkbox" checked={includeDefaults} disabled={isChangingMode} onChange={event => void changeOperation(testEnabled, event.target.checked)} />미응답 학생도 기본값으로 배정 (취침 00:30 · 기상 07:30 · 씻기 07:40)</label></div><div className="test-actions"><button className="secondary-button" onClick={() => void createTestStudents()} disabled={isChangingMode || isLoading}>{isChangingMode ? "변경 중..." : testEnabled ? "테스트 학생 다시 생성" : "테스트 학생 생성"}</button>{(testEnabled || storedTestCount > 0) && <button className="danger-outline" onClick={() => void changeOperation(false, includeDefaults)} disabled={isChangingMode || isLoading}>{testEnabled ? "테스트 종료 · 가상 학생 제거" : "저장된 가상 학생 제거"}</button>}</div></section>
 
-    <section className="summary-grid four-summary" aria-label="기숙사 배정 요약"><article><span>학교 명단 / 실제 응답</span><strong>{schoolRosterSize} / {actualCount}명</strong><small>미응답 {missingCount}명 · 테스트 {testCount}명</small></article><article><span>건물 수용 정원</span><strong>{totalBeds}명</strong><small>{allocation.rooms.length}개 방 · {savedLayout ? "직접 관리" : "자동 구조"}</small></article><article><span>배정 / 자리 부족</span><strong>{assignedCount} / {allocation.waiting.length}명</strong><small>실제 응답 대기 {waitingActual.length}명 · 기본값 배정 {defaultCount}명</small></article><article><span>학년별 수용 정원</span><strong>{gradeBeds.join(" / ")}</strong><small>1학년 / 2학년 / 3학년 · 미응답은 대기 인원과 별도</small></article></section>
+    <section className="summary-grid four-summary" aria-label="기숙사 배정 요약"><article><span>실제 설문 접수 / 배정 대상</span><strong>{roster.receivedStudents.length} / {actualCount}명</strong><small>학교 명단 {schoolRosterSize}명 · 테스트 배정 {testCount}명</small></article><article><span>건물 수용 정원</span><strong>{totalBeds}명</strong><small>{allocation.rooms.length}개 방 · {savedLayout ? "직접 관리" : "자동 구조"}</small></article><article><span>배정 / 자리 부족</span><strong>{assignedCount} / {allocation.waiting.length}명</strong><small>실제 응답 대기 {waitingActual.length}명 · 기본값 배정 {defaultCount}명</small></article><article><span>학년별 수용 정원</span><strong>{gradeBeds.join(" / ")}</strong><small>1학년 / 2학년 / 3학년 · 미응답 {missingCount}명</small></article></section>
     {allocation.waiting.length > 0 && <section className="waiting-panel"><h2>자리 부족으로 배정 대기</h2><p>해당 학년의 방이나 인실을 늘리면 다시 계산합니다. 실제 응답자부터 배정합니다.</p><div>{allocation.waiting.map(student => <span key={student.student_id}>{student.student_name} · {student.student_id}{student.is_test ? " (테스트)" : student.is_default ? " (기본값)" : " (실제)"}</span>)}</div></section>}
-    {roster.outsideRoster.length > 0 && <p className="notice error">현재 반 수·반당 학생 수 범위를 벗어난 실제 응답: {roster.outsideRoster.map(student => student.student_id).join(", ")}. 학교 명단 설정을 확인해 주세요. 이 응답은 자동 배정에 포함되지 않습니다.</p>}
+    {roster.outsideRoster.length > 0 && <p className="notice warning">설문 저장은 완료되었지만 학교 명단 범위를 벗어난 학번: {[...new Set(roster.outsideRoster.map(student => student.student_id))].join(", ")}. 현재 {school.classCount}개 반·반당 {school.studentsPerClass}명입니다. 학교 명단 설정을 수정하면 자동 배정에 반영됩니다.</p>}
+
+    <section className="admin-board received-surveys" aria-labelledby="received-title"><div className="board-heading"><div><h2 id="received-title">실제 설문 접수 명단</h2><p>학교 명단 범위와 관계없이 접수된 실제 응답을 모두 표시합니다. 같은 학번·이름은 마지막 제출 내용으로 갱신됩니다.</p></div><span>{roster.receivedStudents.length}명</span></div>
+      <div className="table-wrap"><table className="survey-table"><thead><tr><th>학번</th><th>이름</th><th>배정 상태</th><th>기상</th><th>취침</th><th>주로 씻기</th><th>최근 제출</th></tr></thead><tbody>
+        {!isLoading && roster.receivedStudents.map(student => {
+          const outside = roster.outsideRoster.some(response => response.id === student.id);
+          const assignment = actualAssignments.get(student.id);
+          const status = outside ? "학교 명단 범위 밖" : !eligibleResponseIds.has(student.id) ? "같은 학번의 다른 이름 확인 필요" : assignment ? `${assignment.building} ${assignment.room}호 · 임시 배정` : "자리 부족 · 배정 대기";
+          return <tr key={student.id}><td>{student.student_id}</td><td><strong>{student.student_name}</strong></td><td><span className={assignment ? "live-badge" : "default-badge"}>{status}</span></td><td>{student.wake_time.slice(0, 5)}</td><td>{student.sleep_time.slice(0, 5)}</td><td>{student.shower_time.slice(0, 5)}</td><td>{new Date(student.created_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", hour12: false })}</td></tr>;
+        })}
+        {(isLoading || roster.receivedStudents.length === 0) && <tr><td colSpan={7}><div className="empty-table">{isLoading ? "실제 설문을 불러오는 중입니다" : "아직 접수된 실제 설문이 없습니다"}</div></td></tr>}
+      </tbody></table></div>
+    </section>
 
     <section className="dorm-map school-dorm-map" aria-labelledby="map-title"><div className="map-heading"><div><p className="eyebrow">LIVE ROOM PROPOSAL</p><h2 id="map-title">학년별 건물·층·구역 지도</h2><p>호수 옆 숫자는 10점 만점의 생활 패턴 적합도입니다. 2명 미만은 평가 대기로 표시합니다.</p></div><div className="grade-legend"><span><i className="grade1-dot" />1학년</span><span><i className="grade2-dot" />2학년</span><span><i className="grade3-dot" />3학년</span></div></div>
       <details className="score-explanation"><summary>적합도 점수는 어떻게 계산하나요?</summary><p>{scoreDescription} 각 방의 학생 쌍별 점수를 평균내며 빈 침대 수는 점수에 반영하지 않습니다. 기본값이 포함된 방은 설문 응답 후 점수가 달라집니다.</p></details>

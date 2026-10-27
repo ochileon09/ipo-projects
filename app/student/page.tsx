@@ -16,6 +16,7 @@ function ScoreField({ name, title, low, high }: { name: string; title: string; l
 export default function StudentApplicationPage() {
   const [connection, setConnection] = useState("연결 확인 중");
   const [notice, setNotice] = useState("");
+  const [noticeKind, setNoticeKind] = useState("success");
   const [isSaving, setIsSaving] = useState(false);
   const [studentId, setStudentId] = useState("");
   const [temperature, setTemperature] = useState(22);
@@ -32,7 +33,7 @@ export default function StudentApplicationPage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (isSaving) return;
-    setIsSaving(true); setNotice("");
+    setIsSaving(true); setNotice(""); setNoticeKind("error");
     const form = event.currentTarget;
     const data = new FormData(form);
     const submittedStudentId = String(data.get("studentId") ?? "").trim();
@@ -42,7 +43,7 @@ export default function StudentApplicationPage() {
       setNotice("이름은 공백만 입력할 수 없습니다.");
       return;
     }
-    const { error } = await supabase.from("student_surveys").insert({
+    const { data: receipt, error } = await supabase.rpc("submit_student_survey", { p_survey: {
       student_id: submittedStudentId,
       student_name: submittedName,
       grade: Number(submittedStudentId.charAt(0)),
@@ -59,10 +60,13 @@ export default function StudentApplicationPage() {
       room_activity: Number(data.get("roomActivity")),
       roommate_preference: String(data.get("roommatePreference") ?? "").trim() || null,
       accessibility_needs: String(data.get("accessibility") ?? "").trim() || null,
-    });
+    } });
     setIsSaving(false);
     if (error) { setNotice(`저장 실패: ${error.message}`); return; }
-    setNotice("설문이 제출되었습니다. 응답한 생활 습관을 호실 배정에 반영할게요.");
+    const saved = receipt?.[0];
+    if (!saved?.survey_id) { setNotice("저장 결과를 확인하지 못했습니다. 잠시 후 다시 제출해 주세요."); return; }
+    setNoticeKind(saved.matches_school_roster ? "success" : "warning");
+    setNotice((saved.was_updated ? "기존 설문을 새 응답으로 갱신했습니다." : "설문이 DB에 저장되었습니다.") + (saved.matches_school_roster ? " 관리자 화면의 실제 설문 접수 명단에 반영됩니다." : " 현재 학교 명단의 반·번호 범위를 벗어나 자동 배정은 대기 중입니다. 관리자에게 명단 설정 확인을 요청해 주세요."));
     setStudentId(""); setTemperature(22); form.reset();
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -74,11 +78,11 @@ export default function StudentApplicationPage() {
       <div className="hero-card" aria-label="설문 접수 상태"><span className="status-dot" /><div><strong>{connection}</strong><p>작성 후 제출 버튼을 눌러주세요</p></div></div>
     </header>
 
-    {notice && <p className={`notice ${notice.startsWith("저장 실패") || notice.startsWith("이름") ? "error" : "success"}`} role="status">{notice}</p>}
+    {notice && <p className={`notice ${noticeKind}`} role="status">{notice}</p>}
 
     <form className="survey" onSubmit={handleSubmit}>
       <section className="form-section">
-        <div className="section-heading"><span>01</span><div><h2>학생 기본 정보</h2><p>배정 결과를 구분하기 위한 기본 정보입니다.</p></div></div>
+        <div className="section-heading"><span>01</span><div><h2>학생 기본 정보</h2><p>같은 학번과 이름으로 다시 제출하면 기존 설문이 새 응답으로 갱신됩니다.</p></div></div>
         <div className="grid two-columns">
           <label><span>학번 <b className="required-star">*</b></span><input name="studentId" inputMode="numeric" pattern="[1-3][1-9](0[1-9]|[12][0-9]|30)" placeholder="예: 2602" required maxLength={4} title="학년·반·번호 순서의 네 자리 학번을 입력하세요." value={studentId} onChange={(event) => setStudentId(event.target.value.replace(/\D/g, "").slice(0, 4))} /><small>1~3학년의 네 자리 학번을 입력합니다.</small></label>
           <label><span>이름 <b className="required-star">*</b></span><input name="name" placeholder="이름 입력" required maxLength={30} /></label>

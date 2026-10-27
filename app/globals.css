@@ -181,6 +181,7 @@ textarea { resize: vertical; }
 .notice { margin-bottom: 22px; padding: 14px 18px; border: 1px solid var(--shell-border); border-radius: 10px; font-size: 13px; }
 .notice.success { color: var(--success-text); background: var(--success-bg); border-color: color-mix(in srgb, var(--success-text) 22%, transparent); }
 .notice.error { color: var(--error-text); background: var(--error-bg); border-color: color-mix(in srgb, var(--error-text) 22%, transparent); }
+.notice.warning { color: var(--shell-accent); background: var(--shell-accent-soft); border-color: color-mix(in srgb, var(--shell-accent) 35%, transparent); }
 .admin-login-page { display: grid; place-items: center; }
 .admin-login-card { display: grid; gap: 20px; width: min(420px, 100%); padding: 36px; border: 1px solid var(--shell-border); border-radius: 18px; background: var(--shell-panel); box-shadow: var(--shell-shadow); }
 .login-symbol { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 13px; background: var(--shell-accent-soft); color: var(--shell-accent); }

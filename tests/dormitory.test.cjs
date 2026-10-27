@@ -82,3 +82,23 @@ test('invalid layouts and actual IDs outside configured classes are surfaced',()
   assert.equal(roster.outsideRoster[0].student_id,'2602');
   assert.equal(roster.activeStudents.length,0);
 });
+
+test('received actual surveys remain visible outside school capacity and deduplicate by both ID and name', () => {
+  const rows = [
+    student('2101', { id:'old', student_name:'홍길동' }),
+    student('2101', { id:'new', student_name:' 홍길동 ', student_id:' 2101 ', created_at:'2026-10-27T00:00:00Z', wake_time:'08:00' }),
+    student('2101', { id:'other-name', student_name:'김학생' }),
+    student('2602', { id:'outside', student_id:'2518', student_name:'범위밖학생' }),
+    student('2102', { id:'test-only', is_test:true }),
+  ];
+  const roster=selectRoster(rows,6,16,false,false);
+  assert.equal(roster.receivedStudents.length,3);
+  assert.equal(roster.receivedStudents.find(row=>row.student_name==='홍길동').id,'new');
+  assert.equal(roster.receivedStudents.find(row=>row.student_name==='홍길동').wake_time,'08:00');
+  assert.equal(roster.outsideRoster[0].student_id,'2518');
+  assert.equal(roster.activeStudents.length,1);
+  assert.equal(roster.activeStudents[0].id,'new');
+  const expanded=selectRoster(rows,6,18,false,false);
+  assert.equal(expanded.outsideRoster.length,0);
+  assert.equal(expanded.activeStudents.length,2);
+});

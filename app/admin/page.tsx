@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import { supabase } from "@/lib/supabase/client";
 import { Icon } from "@/components/icon";
 import { DormitoryEditor } from "@/components/dormitory-editor";
+import { FloorGridMap } from "@/components/floor-grid-map";
 import { allocateDormitory, createDefaultLayout, validateLayout, type AssignedRoom, type DormLayout, type FloorLayout } from "@/lib/dormitory-layout";
 import { selectRoster, type SurveyRow } from "@/lib/student-roster";
 
@@ -194,7 +195,7 @@ export default function AdminPage() {
       </form>
     </section>
 
-    <DormitoryEditor value={draftLayout ?? effectiveLayout} onChange={setDraftLayout} onSave={() => void saveLayout(draftLayout ?? effectiveLayout)} onAuto={() => void saveLayout(null)} busy={isSavingLayout} dirty={draftLayout !== null} />
+    <DormitoryEditor value={draftLayout ?? effectiveLayout} onChange={setDraftLayout} onSave={() => void saveLayout(draftLayout ?? effectiveLayout)} onAuto={() => void saveLayout(null)} busy={isSavingLayout} dirty={draftLayout !== null} students={roster.activeStudents} />
 
     <section className="test-panel admin-test-panel" aria-labelledby="test-mode-title"><div><p className="eyebrow">OPERATION MODE</p><h2 id="test-mode-title">{testEnabled ? "테스트 모드 사용 중" : "실제 운영 모드"}</h2><p>관리자 페이지를 새로 열면 테스트 모드는 꺼집니다. 테스트 학생 생성 버튼을 누른 경우에만 가상 학생을 배정에 포함합니다.</p>{!testEnabled && storedTestCount > 0 && <p>저장된 가상 학생 {storedTestCount}명은 현재 배정에서 제외되어 있습니다. 제거 버튼으로 DB에서도 정리할 수 있습니다.</p>}<label className="check-label defaults-option"><input type="checkbox" checked={includeDefaults} disabled={isChangingMode} onChange={event => void changeOperation(testEnabled, event.target.checked)} />미응답 학생도 기본값으로 배정 (취침 00:30 · 기상 07:30 · 씻기 07:40)</label></div><div className="test-actions"><button className="secondary-button" onClick={() => void createTestStudents()} disabled={isChangingMode || isLoading}>{isChangingMode ? "변경 중..." : testEnabled ? "테스트 학생 다시 생성" : "테스트 학생 생성"}</button>{(testEnabled || storedTestCount > 0) && <button className="danger-outline" onClick={() => void changeOperation(false, includeDefaults)} disabled={isChangingMode || isLoading}>{testEnabled ? "테스트 종료 · 가상 학생 제거" : "저장된 가상 학생 제거"}</button>}</div></section>
 
@@ -218,6 +219,7 @@ export default function AdminPage() {
       <details className="score-explanation"><summary>적합도 점수는 어떻게 계산하나요?</summary><p>{scoreDescription} 각 방의 학생 쌍별 점수를 평균내며 빈 침대 수는 점수에 반영하지 않습니다. 기본값이 포함된 방은 설문 응답 후 점수가 달라집니다.</p></details>
       {effectiveLayout.map(building => <div className="building-block" key={building.id}><div className="building-heading"><div><strong>{building.name}</strong>{building.provisional && <span>임시 지도</span>}</div><p>{savedLayout ? "관리자가 저장한 구조" : "명단·기본 인실에 맞춘 자동 구조"}</p></div>
         {[...building.floors].sort((a, b) => b.floor - a.floor).map(floor => {
+          if (floor.grid) return <article className="school-floor" key={floor.id}><header><div><strong>{floor.floor}F</strong><span>관리자가 구성한 층 지도</span></div><small>{floor.grid.spaces.filter(space => space.kind === "room").length}개 호실 · {building.diningSide === "none" ? "식당 방향 미지정" : building.diningSide === "left" ? "왼쪽 식당 방향" : "오른쪽 식당 방향"}</small></header><FloorGridMap floor={floor} buildingId={building.id} rooms={allocation.rooms} /></article>;
           const left = Array.from({ length: floor.leftRooms }, (_, i) => roomsById.get(building.id + "/" + floor.id + "/left/" + i)!);
           const right = Array.from({ length: floor.rightRooms }, (_, i) => roomsById.get(building.id + "/" + floor.id + "/right/" + i)!);
           return <article className="school-floor" key={floor.id}><header><div><strong>{floor.floor}F</strong><span>왼쪽 {floor.leftGrade}학년 · 오른쪽 {floor.rightGrade}학년</span></div><small>{left.length + right.length}개 호실</small></header>

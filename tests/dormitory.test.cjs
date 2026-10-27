@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const { roomCompatibilityScore, optimizeRoomAssignments } = require('../.codex_tmp/matching-tests/roommate-matching.js');
 const { createDefaultLayout, allocateDormitory, newFloor, validateLayout } = require('../.codex_tmp/matching-tests/dormitory-layout.js');
 const { selectRoster, createDefaultRoster } = require('../.codex_tmp/matching-tests/student-roster.js');
+const { createFloorGrid, expandSelection, paintGrid, mergeGrid, splitGrid, moveGridSpace, validateFloorGrid } = require('../.codex_tmp/matching-tests/floor-grid.js');
+const { floorRooms, gridFromLegacyFloor } = require('../.codex_tmp/matching-tests/dormitory-layout.js');
 
 function student(studentId, overrides = {}) {
   return { ...createDefaultRoster(6, 16).find(row => row.student_id === studentId), id: studentId, is_default: false, student_name: '학생' + studentId, created_at: '2026-10-01T00:00:00Z', ...overrides };
@@ -101,4 +103,69 @@ test('received actual surveys remain visible outside school capacity and dedupli
   const expanded=selectRoster(rows,6,18,false,false);
   assert.equal(expanded.outsideRoster.length,0);
   assert.equal(expanded.activeStudents.length,2);
+});
+
+test('legacy room conversion preserves every room ID, number, grade and bed count for all supported wing sizes', () => {
+  for(const count of [0,1,4,16,49]) {
+    const floor={...newFloor(3,3,2),leftRooms:count,rightRooms:49-count,rightGrade:2,rightCapacity:4};
+    const grid=gridFromLegacyFloor(floor);
+    assert.equal(validateFloorGrid(grid),null);
+    assert.deepEqual(floorRooms({...floor,grid}).sort((a,b)=>a.id.localeCompare(b.id)),floorRooms(floor).sort((a,b)=>a.id.localeCompare(b.id)));
+  }
+});
+
+test('L shaped floors and facilities count only room beds; merged rooms count as one and expand selections',()=>{
+  let grid=createFloorGrid(3,4,2,2,2);
+  grid=paintGrid(grid,{top:0,left:2,bottom:1,right:3},'outside',2,2,2);
+  grid=mergeGrid(grid,{top:2,left:2,bottom:2,right:3},'laundry',2,2,2);
+  assert.equal(validateFloorGrid(grid),null);
+  const layout=[{id:'a',name:'A',diningSide:'none',floors:[{...newFloor(2),grid}]}];
+  let result=allocateDormitory([],layout);
+  assert.equal(result.rooms.length,6);
+  assert.equal(result.rooms.reduce((n,r)=>n+r.capacity,0),12);
+  grid=mergeGrid(grid,{top:0,left:0,bottom:1,right:1},'room',2,3,4);
+  assert.deepEqual(expandSelection(grid,{row:1,col:1}),{top:0,left:0,bottom:1,right:1});
+  result=allocateDormitory([],[{...layout[0],floors:[{...newFloor(2),grid}]}]);
+  assert.equal(result.rooms.length,3);
+  assert.equal(result.rooms.reduce((n,r)=>n+r.capacity,0),8);
+  const split=splitGrid(grid,{top:0,left:0,bottom:1,right:1},2);
+  assert.equal(validateFloorGrid(split),null);
+  assert.equal(new Set(split.spaces.filter(s=>s.kind==='room').map(s=>s.number)).size,6);
+});
+
+test('moving a merged room retains its identity and rejects overlap or leaving the canvas',()=>{
+  let grid=createFloorGrid(4,4,2,2,2,false);
+  grid=mergeGrid(grid,{top:0,left:0,bottom:1,right:1},'room',2,2,3);
+  const room=grid.spaces.find(s=>s.kind==='room');
+  grid=moveGridSpace(grid,room.id,2,2);
+  assert.equal(validateFloorGrid(grid),null);
+  assert.deepEqual(grid.spaces.find(s=>s.id===room.id),{...room,row:2,col:2});
+  const occupied=paintGrid(grid,{top:0,left:0,bottom:0,right:0},'stairs',2,2,2);
+  assert.throws(()=>moveGridSpace(occupied,room.id,0,0),/겹칩니다/);
+  assert.throws(()=>moveGridSpace(grid,room.id,3,3),/밖/);
+});
+
+test('grid validation rejects overlaps, holes, duplicate room numbers, invalid spans and unsupported capacity',()=>{
+  const grid=createFloorGrid(2,2,2,2,2);
+  assert(validateFloorGrid({...grid,spaces:[...grid.spaces,grid.spaces[0]]}));
+  assert(validateFloorGrid({...grid,spaces:grid.spaces.slice(1)}));
+  assert(validateFloorGrid({...grid,spaces:grid.spaces.map((s,i)=>i? s:{...s,rowSpan:3})}));
+  assert(validateFloorGrid({...grid,spaces:grid.spaces.map((s,i)=>i? s:{...s,capacity:7})}));
+  assert(validateLayout([{id:'a',name:'A',diningSide:'none',floors:[{...newFloor(2),grid:{...grid,spaces:grid.spaces.map(s=>({...s,number:'201'}))}}]}]));
+});
+
+test('mixed grid and legacy floors retain grade segregation and report capacity shortages',()=>{
+  let grid=createFloorGrid(1,2,2,2,1);
+  grid=paintGrid(grid,{top:0,left:1,bottom:0,right:1},'room',2,3,2);
+  const layout=[{id:'a',name:'A',diningSide:'none',floors:[{...newFloor(2),grid},{...newFloor(3,1,1),leftRooms:1,rightRooms:0}]}];
+  assert.equal(validateLayout(layout),null);
+  const result=allocateDormitory([student('1101'),student('2101'),student('2102'),student('3101'),student('3102')],layout);
+  assert.equal(result.waiting.length,1);
+  assert(result.rooms.every(room=>room.students.every(s=>s.grade===room.grade)&&room.students.length<=room.capacity));
+});
+
+test('large generated floors keep unique room numbers across one and two digit floor numbers',()=>{
+  const floors=[1,11].map(n=>({...newFloor(n),grid:createFloorGrid(12,12,n,1,2)}));
+  assert.equal(validateLayout([{id:'a',name:'A',diningSide:'none',floors}]),null);
+  assert(floors[0].grid.spaces.some(s=>s.number==='1-100'));
 });

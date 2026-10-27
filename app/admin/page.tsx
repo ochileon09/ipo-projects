@@ -1,340 +1,225 @@
 "use client";
 
-import { FormEvent, useCallback, useMemo, useState } from "react";
-import { matchRoommates, roomCompatibilityScore } from "@/lib/roommate-matching";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { Icon } from "@/components/icon";
+import { DormitoryEditor } from "@/components/dormitory-editor";
+import { allocateDormitory, createDefaultLayout, validateLayout, type AssignedRoom, type DormLayout, type FloorLayout } from "@/lib/dormitory-layout";
+import { selectRoster, type SurveyRow } from "@/lib/student-roster";
 
-type SurveyRow = {
-  id: string;
-  student_id: string;
-  student_name: string;
-  grade: number;
-  wake_time: string;
-  sleep_time: string;
-  shower_time: string;
-  shower_frequency: number;
-  tidiness: number;
-  noise_sensitivity: number;
-  preferred_temperature: number;
-  light_sensitivity: number;
-  ventilation_preference: number;
-  alarm_sensitivity: number;
-  room_activity: number;
-  is_test: boolean;
-  is_default: boolean;
-  created_at: string;
-};
+const scoreDescription = "0~10점 생활 패턴 적합도: 취침·기상·청결·소음·온도·조명·환기·알람·활동의 유사성과 샤워 시간 분산을 가중 합산한 뒤 정규화합니다. 모든 조합 중 수학적 최적임을 보장하는 값은 아닙니다.";
+type SchoolSettings = { classCount: number; studentsPerClass: number; roomCapacity: number };
 
-type RoomInfo = { number: string; students: SurveyRow[]; grade: 1 | 2 | 3; score: number | null };
-type FloorInfo = { floor: 2 | 3 | 4; leftGrade: 1 | 2 | 3; rightGrade: 1 | 2 | 3; left: RoomInfo[]; right: RoomInfo[] };
-type BuildingInfo = { name: string; description: string; provisional?: boolean; floors: FloorInfo[] };
-
-function isSchoolStudentId(studentId: string, classCount: number, studentsPerClass: number) {
-  if (!/^[1-3][1-9][0-9]{2}$/.test(studentId)) return false;
-  const classNo = Number(studentId.charAt(1));
-  const seatNo = Number(studentId.slice(2));
-  return classNo >= 1 && classNo <= classCount && seatNo >= 1 && seatNo <= studentsPerClass;
-}
-
-function createDefaultRoster(classCount: number, studentsPerClass: number): SurveyRow[] {
-  const students: SurveyRow[] = [];
-  [1, 2, 3].forEach((grade) => {
-    for (let classNo = 1; classNo <= classCount; classNo += 1) {
-      for (let seatNo = 1; seatNo <= studentsPerClass; seatNo += 1) {
-        const studentId = `${grade}${classNo}${String(seatNo).padStart(2, "0")}`;
-        students.push({
-          id: `default-${studentId}`,
-          student_id: studentId,
-          student_name: `미응답 ${studentId}`,
-          grade,
-          wake_time: "07:30:00",
-          sleep_time: "00:30:00",
-          shower_time: "07:40:00",
-          shower_frequency: 1,
-          tidiness: 3,
-          noise_sensitivity: 3,
-          preferred_temperature: 22,
-          light_sensitivity: 3,
-          ventilation_preference: 3,
-          alarm_sensitivity: 3,
-          room_activity: 3,
-          is_test: false,
-          is_default: true,
-          created_at: "",
-        });
-      }
-    }
-  });
-  return students;
-}
-
-function RoomCard({ room, roomCapacity }: { room: RoomInfo; roomCapacity: number }) {
-  return <section className="school-room-card">
-    <div className="school-room-header"><strong>{room.number}</strong><span>{room.students.length}/{roomCapacity}</span></div>
-    <div className="compact-bed-list">
-      {Array.from({ length: roomCapacity }, (_, bedIndex) => {
-        const student = room.students[bedIndex];
-        return <div className={student ? "compact-bed occupied" : "compact-bed"} key={bedIndex}>
-          <i>{bedIndex + 1}</i>
-          {student ? <div><b>{student.student_name}</b><small>{student.student_id} · 씻기 {student.shower_time.slice(0, 5)}{student.is_default ? " · 기본값" : ""}</small></div> : <em>빈 자리</em>}
-        </div>;
-      })}
-    </div>
-    {room.score !== null && <small className="match-score">생활 조합 {room.score}점</small>}
+function RoomCard({ room }: { room: AssignedRoom<SurveyRow> }) {
+  const uncertain = room.students.some(student => student.is_default);
+  return <section className="school-room-card" aria-label={room.number + "호"}>
+    <div className="school-room-header"><div className="room-number-score"><strong>{room.number}</strong><span className={"room-score " + (room.score === null ? "unrated" : room.score >= 8 ? "score-high" : room.score >= 6 ? "score-mid" : "score-low")} title={room.score === null ? "생활 패턴을 비교하려면 2명 이상 필요합니다." : scoreDescription}>{room.score === null ? "평가 대기" : room.score.toFixed(1) + " / 10"}</span></div><span>{room.students.length}/{room.capacity}</span></div>
+    <div className="compact-bed-list">{Array.from({ length: room.capacity }, (_, bedIndex) => {
+      const student = room.students[bedIndex];
+      return <div className={student ? "compact-bed occupied" : "compact-bed"} key={bedIndex}><i>{bedIndex + 1}</i>{student ? <div><b title={student.student_name}>{student.student_name}</b><small>{student.student_id} · 씻기 {student.shower_time.slice(0, 5)}{student.is_default ? " · 기본값" : student.is_test ? " · 테스트" : " · 실제"}</small></div> : <em>빈 자리</em>}</div>;
+    })}</div>
+    <small className="match-score">{uncertain ? "기본값 포함 · 응답 후 점수 변경" : room.students.length > 1 ? "생활 패턴 기반 임시 배정" : "룸메이트 응답 후 점수 산출"}</small>
   </section>;
+}
+
+function facilities(floor: FloorLayout, side: "left" | "right") {
+  const items = [floor[side === "left" ? "leftStairs" : "rightStairs"] && "계단", floor[side === "left" ? "leftWasher" : "rightWasher"] && "세탁기", floor[side === "left" ? "leftDryer" : "rightDryer"] && "건조기"].filter(Boolean);
+  return items.length ? (side === "left" ? "왼쪽 " : "오른쪽 ") + items.join(" · ") : "공용 시설 없음";
 }
 
 export default function AdminPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [adminKey, setAdminKey] = useState("");
   const [authError, setAuthError] = useState("");
+  const [isSigningIn, setIsSigningIn] = useState(false);
   const [surveys, setSurveys] = useState<SurveyRow[]>([]);
-  const [classCount, setClassCount] = useState(6);
-  const [studentsPerClass, setStudentsPerClass] = useState(16);
-  const [roomCapacity, setRoomCapacity] = useState(2);
+  const [school, setSchool] = useState<SchoolSettings>({ classCount: 6, studentsPerClass: 16, roomCapacity: 2 });
+  const [draftSchool, setDraftSchool] = useState(school);
+  const [savedLayout, setSavedLayout] = useState<DormLayout | null>(null);
+  const [draftLayout, setDraftLayout] = useState<DormLayout | null>(null);
+  const [testEnabled, setTestEnabled] = useState(false);
+  const [includeDefaults, setIncludeDefaults] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [isSavingLayout, setIsSavingLayout] = useState(false);
+  const [isChangingMode, setIsChangingMode] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [settingsNotice, setSettingsNotice] = useState("");
-  const [isSeeding, setIsSeeding] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState("");
+  const [movedCount, setMovedCount] = useState(0);
+  const requestVersion = useRef(0);
+  const previousAssignments = useRef(new Map<string, string>());
 
-  const loadDashboard = useCallback(async (schoolKey: string) => {
-    setIsLoading(true); setErrorMessage("");
-    const [surveyResult, settingsResult] = await Promise.all([
+  const loadDashboard = useCallback(async (schoolKey: string, withSettings = false) => {
+    const version = ++requestVersion.current;
+    if (withSettings) setIsLoading(true);
+    const [surveyResult, managementResult, settingsResult] = await Promise.all([
       supabase.rpc("get_student_surveys_for_admin_by_key", { p_admin_key: schoolKey }),
-      supabase.rpc("get_dormitory_settings_by_key", { p_admin_key: schoolKey }),
+      supabase.rpc("get_dormitory_management_by_key", { p_admin_key: schoolKey }),
+      withSettings ? supabase.rpc("get_dormitory_settings_by_key", { p_admin_key: schoolKey }) : Promise.resolve(null),
     ]);
-    if (surveyResult.error || settingsResult.error) {
-      setErrorMessage(`DB 조회 실패: ${(surveyResult.error ?? settingsResult.error)?.message}`);
-    } else {
-      setSurveys(((surveyResult.data ?? []) as Omit<SurveyRow, "is_default">[]).map((survey) => ({ ...survey, is_default: false })));
-      const settings = settingsResult.data?.[0];
-      if (settings) {
-        setClassCount(Number(settings.class_count));
-        setStudentsPerClass(Number(settings.students_per_class));
-        setRoomCapacity(Number(settings.room_capacity));
+    if (version !== requestVersion.current) return;
+    const error = surveyResult.error ?? managementResult.error ?? settingsResult?.error;
+    if (error) setErrorMessage("DB 조회 실패: " + error.message);
+    else {
+      setErrorMessage("");
+      const next = ((surveyResult.data ?? []) as Omit<SurveyRow, "is_default">[]).map(survey => ({ ...survey, is_default: false }));
+      setSurveys(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next);
+      const management = managementResult.data?.[0];
+      if (management) {
+        setSavedLayout(previous => JSON.stringify(previous) === JSON.stringify(management.layout) ? previous : management.layout as DormLayout | null);
+        setTestEnabled(management.test_enabled);
+        setIncludeDefaults(management.include_defaults);
       }
+      const settings = settingsResult?.data?.[0];
+      if (settings) {
+        const nextSchool = { classCount: Number(settings.class_count), studentsPerClass: Number(settings.students_per_class), roomCapacity: Number(settings.room_capacity) };
+        setSchool(nextSchool); setDraftSchool(nextSchool);
+      }
+      setUpdatedAt(new Date().toLocaleTimeString("ko-KR", { hour12: false }));
     }
     setIsLoading(false);
   }, []);
 
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const update = () => { if (document.visibilityState === "visible") void loadDashboard(adminKey); };
+    const timer = window.setInterval(update, 10000);
+    window.addEventListener("focus", update);
+    document.addEventListener("visibilitychange", update);
+    return () => { window.clearInterval(timer); window.removeEventListener("focus", update); document.removeEventListener("visibilitychange", update); };
+  }, [adminKey, isAuthenticated, loadDashboard]);
+
   async function signIn(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setAuthError("");
-    const data = new FormData(event.currentTarget);
-    const schoolKey = String(data.get("schoolKey") ?? "").trim();
+    event.preventDefault(); if (isSigningIn) return;
+    setAuthError(""); setIsSigningIn(true);
+    const schoolKey = String(new FormData(event.currentTarget).get("schoolKey") ?? "").trim();
     const { data: isValid, error } = await supabase.rpc("verify_school_admin_key", { p_admin_key: schoolKey });
-    if (error || !isValid) { setAuthError("관리자 인증키를 확인해 주세요."); return; }
-    setAdminKey(schoolKey); setIsAuthenticated(true); await loadDashboard(schoolKey);
+    setIsSigningIn(false);
+    if (error) { setAuthError("인증 서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요."); return; }
+    if (!isValid) { setAuthError("관리자 인증키를 확인해 주세요."); return; }
+    setAdminKey(schoolKey); setIsAuthenticated(true); await loadDashboard(schoolKey, true);
   }
 
   function signOut() {
-    setIsAuthenticated(false); setAdminKey(""); setSurveys([]); setAuthError(""); setSettingsNotice(""); setErrorMessage("");
+    requestVersion.current += 1;
+    setIsAuthenticated(false); setAdminKey(""); setSurveys([]); setAuthError(""); setSettingsNotice(""); setErrorMessage(""); setDraftLayout(null);
+    previousAssignments.current = new Map(); setMovedCount(0);
   }
 
   async function createTestStudents() {
-    if (isSeeding) return;
-    setIsSeeding(true); setSettingsNotice(""); setErrorMessage("");
-    const { data, error } = await supabase.rpc("seed_test_student_surveys_by_key", {
-      p_admin_key: adminKey,
-    });
-    setIsSeeding(false);
-    if (error) { setErrorMessage(`테스트 데이터 생성 실패: ${error.message}`); return; }
-    setSettingsNotice(`실제 응답자를 제외한 가상 설문 ${Number(data ?? 0)}명이 생성되었습니다.`);
-    await loadDashboard(adminKey);
+    if (isChangingMode) return;
+    setIsChangingMode(true); setErrorMessage(""); setSettingsNotice("");
+    const { data, error } = await supabase.rpc("seed_test_student_surveys_by_key", { p_admin_key: adminKey });
+    if (error) setErrorMessage("테스트 데이터 생성 실패: " + error.message);
+    else { await loadDashboard(adminKey); setSettingsNotice("실제 응답은 보존하고 테스트 학생 " + Number(data ?? 0) + "명을 생성했습니다."); }
+    setIsChangingMode(false);
+  }
+
+  async function changeOperation(nextTest: boolean, nextDefaults: boolean) {
+    if (isChangingMode) return;
+    setIsChangingMode(true); setErrorMessage(""); setSettingsNotice("");
+    const { data, error } = await supabase.rpc("set_dormitory_operation_by_key", { p_admin_key: adminKey, p_test_enabled: nextTest, p_include_defaults: nextDefaults });
+    if (error) setErrorMessage("운영 모드 변경 실패: " + error.message);
+    else { await loadDashboard(adminKey); setSettingsNotice(nextTest ? "기본값 포함 설정을 변경했습니다." : "실제 운영 모드입니다. 테스트 학생 " + Number(data ?? 0) + "명을 제거했으며 실제 응답은 보존했습니다."); }
+    setIsChangingMode(false);
   }
 
   async function saveSettings(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setIsSavingSettings(true); setSettingsNotice(""); setErrorMessage("");
-    const { data, error } = await supabase.rpc("set_dormitory_settings_by_key", {
-      p_admin_key: adminKey,
-      p_room_capacity: roomCapacity,
-      p_class_count: classCount,
-      p_students_per_class: studentsPerClass,
-    });
+    event.preventDefault(); setIsSavingSettings(true); setSettingsNotice(""); setErrorMessage("");
+    const { error } = await supabase.rpc("set_dormitory_settings_by_key", { p_admin_key: adminKey, p_room_capacity: draftSchool.roomCapacity, p_class_count: draftSchool.classCount, p_students_per_class: draftSchool.studentsPerClass });
+    if (error) setErrorMessage("설정 저장 실패: " + error.message);
+    else { await loadDashboard(adminKey, true); setSettingsNotice(savedLayout ? "학교 명단 설정을 저장했습니다. 직접 관리 중인 건물의 방 수와 인실은 구조 편집기에서 변경해 주세요." : "학교 명단과 기본 인실을 저장하고 자동 구조를 다시 계산했습니다."); }
     setIsSavingSettings(false);
-    if (error) { setErrorMessage(`설정 저장 실패: ${error.message}`); return; }
-    const saved = data?.[0];
-    if (saved) {
-      setClassCount(Number(saved.class_count));
-      setStudentsPerClass(Number(saved.students_per_class));
-      setRoomCapacity(Number(saved.room_capacity));
-    }
-    setSettingsNotice("기숙사 정원과 방 인원 설정이 저장되었습니다.");
   }
 
-  const schoolRosterSize = 3 * classCount * studentsPerClass;
-  const studentsPerGrade = classCount * studentsPerClass;
+  async function saveLayout(layout: DormLayout | null) {
+    if (layout && validateLayout(layout)) { setErrorMessage(validateLayout(layout)!); return; }
+    setIsSavingLayout(true); setSettingsNotice(""); setErrorMessage("");
+    const { error } = await supabase.rpc("save_dormitory_layout_by_key", { p_admin_key: adminKey, p_layout: layout });
+    if (error) setErrorMessage("건물 구조 저장 실패: " + error.message);
+    else { await loadDashboard(adminKey); setDraftLayout(null); setSettingsNotice(layout ? "건물 구조를 저장하고 학년별 배정을 다시 계산했습니다." : "학교 명단과 기본 인실에 맞춘 자동 구조로 복원했습니다."); }
+    setIsSavingLayout(false);
+  }
 
-  const rosterStudents = useMemo(() => {
-    const preferredSurveyByStudent = new Map<string, SurveyRow>();
-    [...surveys]
-      .filter((survey) => isSchoolStudentId(survey.student_id, classCount, studentsPerClass))
-      .sort((a, b) => {
-        if (a.is_test !== b.is_test) return a.is_test ? 1 : -1;
-        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-      })
-      .forEach((survey) => {
-        if (!preferredSurveyByStudent.has(survey.student_id)) {
-          preferredSurveyByStudent.set(survey.student_id, {
-            ...survey,
-            grade: Number(survey.student_id.charAt(0)),
-          });
-        }
-      });
-    return createDefaultRoster(classCount, studentsPerClass).map((defaultStudent) => preferredSurveyByStudent.get(defaultStudent.student_id) ?? defaultStudent);
-  }, [classCount, studentsPerClass, surveys]);
+  const schoolRosterSize = 3 * school.classCount * school.studentsPerClass;
+  const studentsPerGrade = school.classCount * school.studentsPerClass;
+  const automaticLayout = useMemo(() => createDefaultLayout(studentsPerGrade, school.roomCapacity), [studentsPerGrade, school.roomCapacity]);
+  const effectiveLayout = savedLayout ?? automaticLayout;
+  const roster = useMemo(() => selectRoster(surveys, school.classCount, school.studentsPerClass, testEnabled, includeDefaults), [surveys, school.classCount, school.studentsPerClass, testEnabled, includeDefaults]);
+  const allocation = useMemo(() => allocateDormitory(roster.activeStudents, effectiveLayout), [roster.activeStudents, effectiveLayout]);
+  const roomsById = useMemo(() => new Map(allocation.rooms.map(room => [room.id, room])), [allocation.rooms]);
+  const actualCount = roster.allStudents.filter(student => !student.is_default && !student.is_test).length;
+  const testCount = roster.allStudents.filter(student => student.is_test).length;
+  const missingCount = roster.allStudents.filter(student => student.is_default).length;
+  const assignedCount = allocation.rooms.reduce((sum, room) => sum + room.students.length, 0);
+  const totalBeds = allocation.rooms.reduce((sum, room) => sum + room.capacity, 0);
+  const defaultCount = roster.activeStudents.filter(student => student.is_default).length;
+  const gradeBeds = [1, 2, 3].map(grade => allocation.rooms.filter(room => room.grade === grade).reduce((sum, room) => sum + room.capacity, 0));
+  const waitingActual = allocation.waiting.filter(student => !student.is_default && !student.is_test);
 
-  const grade1Rooms = useMemo(() => matchRoommates(rosterStudents.filter((student) => student.grade === 1), roomCapacity), [roomCapacity, rosterStudents]);
-  const grade2Rooms = useMemo(() => matchRoommates(rosterStudents.filter((student) => student.grade === 2), roomCapacity), [roomCapacity, rosterStudents]);
-  const grade3Rooms = useMemo(() => matchRoommates(rosterStudents.filter((student) => student.grade === 3), roomCapacity), [roomCapacity, rosterStudents]);
+  useEffect(() => {
+    const next = new Map<string, string>();
+    allocation.rooms.forEach(room => room.students.forEach(student => { if (!student.is_default && !student.is_test) next.set(student.student_id, room.id); }));
+    let count = 0;
+    next.forEach((room, studentId) => { const previous = previousAssignments.current.get(studentId); if (previous && previous !== room) count += 1; });
+    setMovedCount(count);
+    previousAssignments.current = next;
+  }, [allocation.rooms]);
 
-  const buildings = useMemo<BuildingInfo[]>(() => {
-    function distributeRooms(rooms: SurveyRow[][], zoneCount: number) {
-      const zones: SurveyRow[][][] = [];
-      let cursor = 0;
-      for (let zone = 0; zone < zoneCount; zone += 1) {
-        const size = Math.floor(rooms.length / zoneCount) + (zone < rooms.length % zoneCount ? 1 : 0);
-        zones.push(rooms.slice(cursor, cursor + size));
-        cursor += size;
-      }
-      return zones;
-    }
-    function makeWing(floor: 2 | 3 | 4, startRoom: number, grade: 1 | 2 | 3, groups: SurveyRow[][]): RoomInfo[] {
-      return groups.map((students, index) => ({
-        number: `${floor}${String(startRoom + index).padStart(2, "0")}`,
-        students,
-        grade,
-        score: roomCompatibilityScore(students),
-      }));
-    }
-
-    const grade2Zones = distributeRooms(grade2Rooms, 3);
-    const grade3Zones = distributeRooms(grade3Rooms, 3);
-    const a2Left = makeWing(2, 1, 3, grade3Zones[0]);
-    const a2Right = makeWing(2, a2Left.length + 1, 3, grade3Zones[1]);
-    const a3Left = makeWing(3, 1, 3, grade3Zones[2]);
-    const a3Right = makeWing(3, a3Left.length + 1, 2, grade2Zones[0]);
-    const a4Left = makeWing(4, 1, 2, grade2Zones[1]);
-    const a4Right = makeWing(4, a4Left.length + 1, 2, grade2Zones[2]);
-
-    const grade1Zones = distributeRooms(grade1Rooms, 6);
-    const b2Left = makeWing(2, 1, 1, grade1Zones[0]);
-    const b2Right = makeWing(2, b2Left.length + 1, 1, grade1Zones[1]);
-    const b3Left = makeWing(3, 1, 1, grade1Zones[2]);
-    const b3Right = makeWing(3, b3Left.length + 1, 1, grade1Zones[3]);
-    const b4Left = makeWing(4, 1, 1, grade1Zones[4]);
-    const b4Right = makeWing(4, b4Left.length + 1, 1, grade1Zones[5]);
-
-    return [
-      {
-        name: "A동",
-        description: "2층 3학년 · 3층 왼쪽 3학년/오른쪽 2학년 · 4층 2학년",
-        floors: [
-          { floor: 4, leftGrade: 2, rightGrade: 2, left: a4Left, right: a4Right },
-          { floor: 3, leftGrade: 3, rightGrade: 2, left: a3Left, right: a3Right },
-          { floor: 2, leftGrade: 3, rightGrade: 3, left: a2Left, right: a2Right },
-        ],
-      },
-      {
-        name: "B동",
-        description: "1학년 전용 · 실제 구조 확인 전 자동 최적화 배치",
-        provisional: true,
-        floors: [
-          { floor: 4, leftGrade: 1, rightGrade: 1, left: b4Left, right: b4Right },
-          { floor: 3, leftGrade: 1, rightGrade: 1, left: b3Left, right: b3Right },
-          { floor: 2, leftGrade: 1, rightGrade: 1, left: b2Left, right: b2Right },
-        ],
-      },
-    ];
-  }, [grade1Rooms, grade2Rooms, grade3Rooms]);
-
-  const assignedCount = rosterStudents.length;
-  const waitingCount = 0;
-  const actualCount = rosterStudents.filter((student) => !student.is_default && !student.is_test).length;
-  const testCount = rosterStudents.filter((student) => student.is_test).length;
-  const defaultCount = rosterStudents.filter((student) => student.is_default).length;
-
-  if (!isAuthenticated) return <main className="admin-login-page">
-    <form className="admin-login-card" onSubmit={signIn}>
-      <div className="login-symbol"><Icon name="shield" size={25} /></div><p className="eyebrow">MANAGER ACCESS</p><h1>관리자 인증</h1>
-      <p>기숙사 배정 관리 화면은 관리자 인증키 확인 후 이용할 수 있습니다.</p>
-      <label><span>관리자 인증키</span><input type="password" name="schoolKey" autoComplete="off" placeholder="인증키를 입력하세요" required /></label>
-      {authError && <p className="login-error" role="alert">{authError}</p>}
-      <button type="submit">인증하기</button><small className="login-helper">인증키 발급·변경 방식은 추후 관리자 정책에 맞춰 확장합니다.</small>
-    </form>
-  </main>;
+  if (!isAuthenticated) return <main className="admin-login-page"><form className="admin-login-card" onSubmit={signIn}>
+    <div className="login-symbol"><Icon name="shield" size={25} /></div><p className="eyebrow">MANAGER ACCESS</p><h1>관리자 인증</h1>
+    <p>기숙사 배정 관리 화면은 관리자 인증키 확인 후 이용할 수 있습니다.</p>
+    <label><span>관리자 인증키</span><input type="password" name="schoolKey" autoComplete="off" placeholder="인증키를 입력하세요" required /></label>
+    {authError && <p className="login-error" role="alert">{authError}</p>}<button type="submit" disabled={isSigningIn}>{isSigningIn ? "확인 중..." : "인증하기"}</button>
+    <small className="login-helper">인증키 발급·변경 방식은 추후 관리자 정책에 맞춰 확장합니다.</small>
+  </form></main>;
 
   return <main className="subpage">
     <div className="page-kicker">사감 관리용</div>
-    <div className="admin-title-row">
-      <div><h1>기숙사 배정 지도</h1><p className="page-lead">1·2·3학년을 분리하고, 몇 인실 설정에 맞춘 최적 방 수와 생활 패턴 조합을 확인합니다.</p></div>
-      <div className="admin-actions"><button type="button" className="secondary-button" onClick={signOut}>로그아웃</button><button type="button" className="refresh-button" onClick={() => void loadDashboard(adminKey)} disabled={isLoading}>{isLoading ? "불러오는 중..." : "DB 새로고침"}</button></div>
-    </div>
+    <div className="admin-title-row"><div><h1>기숙사 배정 지도</h1><p className="page-lead">새 응답이 들어오면 전체 조합을 다시 계산합니다. 현재 위치는 확정 배정이 아닌 임시 제안입니다.</p></div><div className="admin-actions"><button className="secondary-button" onClick={signOut}>로그아웃</button><button onClick={() => void loadDashboard(adminKey, true)} disabled={isLoading}>{isLoading ? "불러오는 중..." : "DB 새로고침"}</button></div></div>
+    <div className="live-update-strip" role="status"><span><i />{testEnabled ? "테스트 운영" : "실제 운영"} · 10초마다 응답 확인</span><small>{updatedAt ? "마지막 확인 " + updatedAt : "연결 중"}{movedCount > 0 ? " · 기존 학생 " + movedCount + "명 위치 재조정" : ""}</small></div>
     {errorMessage && <p className="notice error" role="alert">{errorMessage}</p>}
     {settingsNotice && <p className="notice success" role="status">{settingsNotice}</p>}
+    <section className="matching-policy" aria-label="배정 기준"><div><span>실제 응답 우선</span><strong>동일 학번은 실제 응답으로 대체 · 부족한 자리도 실제 응답자 우선</strong></div><div><span>학년 분리</span><strong>구역에 지정한 학년만 배정 · 다른 학년끼리 같은 방 사용 안 함</strong></div><div><span>10점 적합도</span><strong>생활 패턴 유사성과 샤워 시간 분산을 함께 계산</strong></div><div><span>유동적인 임시 배정</span><strong>새 설문에 따라 기존 학생의 방과 룸메이트도 바뀔 수 있음</strong></div></section>
 
-    <section className="matching-policy" aria-label="배정 기준">
-      <div><span>응답 우선순위</span><strong>실제 응답은 테스트 응답보다 항상 먼저 배정</strong></div>
-      <div><span>학년 분리</span><strong>1·2·3학년은 서로 같은 방에 배정하지 않음</strong></div>
-      <div><span>유사도 기준</span><strong>취침·기상·청결·소음 등은 비슷할수록 우선</strong></div>
-      <div><span>씻는 시간</span><strong>시간이 겹치지 않을수록 우선</strong></div>
-    </section>
-
-    <section className="capacity-panel" aria-labelledby="capacity-title">
-      <div><p className="eyebrow">DORMITORY SETTING</p><h2 id="capacity-title">학년별 정원 자동 계산</h2><p>전체 정원 = 3개 학년 × 반 수 × 반당 학생 수입니다. 몇 인실인지에 따라 필요한 방 수도 자동 계산합니다.</p></div>
+    <section className="capacity-panel" aria-labelledby="capacity-title"><div><p className="eyebrow">SCHOOL ROSTER</p><h2 id="capacity-title">학교 명단과 기본 인실</h2><p>전체 명단 = 3개 학년 × 반 수 × 반당 학생 수. {savedLayout ? "직접 관리 구조에서는 아래 인실이 자동으로 방 구조를 덮어쓰지 않습니다." : "자동 구조에서는 명단과 인실에 맞춰 방 수를 계산합니다."}</p></div>
       <form className="capacity-form" onSubmit={saveSettings}>
-        <label><span>학년별 반 수</span><div className="number-input"><input type="number" min="1" max="9" value={classCount} onChange={(event) => setClassCount(Number(event.target.value))} required /><b>반</b></div></label>
-        <label><span>반당 학생 수</span><div className="number-input"><input type="number" min="1" max="30" value={studentsPerClass} onChange={(event) => setStudentsPerClass(Number(event.target.value))} required /><b>명</b></div></label>
-        <label><span>방당 인원</span><div className="number-input"><input type="number" min="1" max="6" value={roomCapacity} onChange={(event) => setRoomCapacity(Number(event.target.value))} required /><b>인실</b></div></label>
-        <div className="calculated-capacity"><span>자동 계산 정원</span><strong>{schoolRosterSize}명</strong><small>학년당 {studentsPerGrade}명 · 학년당 {Math.ceil(studentsPerGrade / roomCapacity)}개 방</small></div>
-        <button type="submit" disabled={isSavingSettings}>{isSavingSettings ? "저장 중..." : "설정 저장"}</button>
+        <label><span>학년별 반 수</span><div className="number-input"><input type="number" min="1" max="9" value={draftSchool.classCount} onChange={event => setDraftSchool({ ...draftSchool, classCount: Number(event.target.value) })} required /><b>반</b></div></label>
+        <label><span>반당 학생 수</span><div className="number-input"><input type="number" min="1" max="30" value={draftSchool.studentsPerClass} onChange={event => setDraftSchool({ ...draftSchool, studentsPerClass: Number(event.target.value) })} required /><b>명</b></div></label>
+        <label><span>기본 방당 인원</span><div className="number-input"><input type="number" min="1" max="6" value={draftSchool.roomCapacity} onChange={event => setDraftSchool({ ...draftSchool, roomCapacity: Number(event.target.value) })} required /><b>인실</b></div></label>
+        <div className="calculated-capacity"><span>설정할 학교 명단</span><strong>{3 * draftSchool.classCount * draftSchool.studentsPerClass}명</strong><small>저장 후 반영 · 현재 명단 {schoolRosterSize}명</small></div><button disabled={isSavingSettings}>{isSavingSettings ? "저장 중..." : "명단 설정 저장"}</button>
       </form>
     </section>
 
-    <section className="test-panel admin-test-panel" aria-labelledby="test-mode-title">
-      <div><p className="eyebrow">DEMO TOOL</p><h2 id="test-mode-title">학교 명단 테스트 모드</h2><p>현재 설정에 맞는 1~3학년 네 자리 학번을 만들고 실제 응답자를 제외한 가상 설문을 생성합니다.</p></div>
-      <div className="test-actions"><button type="button" className="secondary-button" onClick={() => void createTestStudents()} disabled={isSeeding}>{isSeeding ? "생성 중..." : `${schoolRosterSize}명 명단으로 배정 시험`}</button></div>
-    </section>
+    <DormitoryEditor value={draftLayout ?? effectiveLayout} onChange={setDraftLayout} onSave={() => void saveLayout(draftLayout ?? effectiveLayout)} onAuto={() => void saveLayout(null)} busy={isSavingLayout} dirty={draftLayout !== null} />
 
-    <section className="summary-grid four-summary" aria-label="기숙사 배정 요약">
-      <article><span>학교 명단</span><strong>{schoolRosterSize}명</strong><small>학년당 {classCount}반 × {studentsPerClass}명</small></article>
-      <article><span>실제 / 테스트 응답</span><strong>{actualCount} / {testCount}명</strong><small>실제 응답 최우선 · 이후 최신 응답</small></article>
-      <article><span>기본값 적용</span><strong>{defaultCount}명</strong><small>00:30 · 07:30 · 씻기 07:40</small></article>
-      <article><span>배정 / 대기</span><strong>{assignedCount} / {waitingCount}명</strong><small>{roomCapacity}인실 · 학년당 {Math.ceil(studentsPerGrade / roomCapacity)}개 방</small></article>
-    </section>
+    <section className="test-panel admin-test-panel" aria-labelledby="test-mode-title"><div><p className="eyebrow">OPERATION MODE</p><h2 id="test-mode-title">{testEnabled ? "테스트 모드 사용 중" : "실제 운영 모드"}</h2><p>실제 운영은 응답한 학생부터 배정합니다. 테스트 종료 시 생성된 가상 학생만 제거하고 실제 응답은 그대로 유지합니다.</p><label className="check-label defaults-option"><input type="checkbox" checked={includeDefaults} disabled={isChangingMode} onChange={event => void changeOperation(testEnabled, event.target.checked)} />미응답 학생도 기본값으로 배정 (취침 00:30 · 기상 07:30 · 씻기 07:40)</label></div><div className="test-actions"><button className="secondary-button" onClick={() => void createTestStudents()} disabled={isChangingMode || isLoading}>{isChangingMode ? "변경 중..." : testEnabled ? "테스트 학생 다시 생성" : "테스트 학생 생성"}</button>{testEnabled && <button className="danger-outline" onClick={() => void changeOperation(false, includeDefaults)} disabled={isChangingMode || isLoading}>테스트 종료 · 가상 학생 제거</button>}</div></section>
 
-    <section className="dorm-map school-dorm-map" aria-labelledby="map-title">
-      <div className="map-heading"><div><p className="eyebrow">SCHOOL DORMITORY · 자동 방 수 최적화</p><h2 id="map-title">학년별 건물·층·구역 지도</h2><p>필요한 방 수는 학년 인원과 몇 인실 설정으로 계산하며, 다른 학년은 같은 방을 사용하지 않습니다.</p></div><div className="grade-legend"><span><i className="grade1-dot" />1학년</span><span><i className="grade2-dot" />2학년</span><span><i className="grade3-dot" />3학년</span></div></div>
-      {buildings.map((building) => <div className="building-block" key={building.name}>
-        <div className="building-heading"><div><strong>{building.name}</strong>{building.provisional && <span>임시 지도</span>}</div><p>{building.description}</p></div>
-        {building.floors.map((floor) => {
-          const leftGrade = floor.leftGrade;
-          const rightGrade = floor.rightGrade;
-          return <article className="school-floor" key={`${building.name}-${floor.floor}`}>
-            <header><div><strong>{floor.floor}F</strong><span>왼쪽 {leftGrade}학년 · 오른쪽 {rightGrade}학년</span></div><small>{floor.left.length + floor.right.length}개 호실</small></header>
-            <div className="facility-strip"><span>{building.name === "A동" ? "식당 방향" : "왼쪽 끝"}</span><b>왼쪽 계단 · 세탁기{floor.floor === 2 || floor.floor === 4 ? " · 건조기" : ""}</b><b>중앙 계단</b><b>오른쪽 계단 · 세탁기{floor.floor === 2 || floor.floor === 4 ? " · 건조기" : ""}</b><span>오른쪽 끝</span></div>
-            <div className="wing-labels"><span className={`grade-${leftGrade}`}>왼쪽 구역 · {leftGrade}학년</span><i>중앙 복도</i><span className={`grade-${rightGrade}`}>오른쪽 구역 · {rightGrade}학년</span></div>
-            <div className="school-room-layout">
-              <div className="room-wing">{floor.left.map((room) => <RoomCard room={room} roomCapacity={roomCapacity} key={room.number} />)}</div>
-              <div className="central-corridor"><span>계단</span><b>{floor.floor}층 중앙</b><span>복도</span></div>
-              <div className="room-wing">{floor.right.map((room) => <RoomCard room={room} roomCapacity={roomCapacity} key={room.number} />)}</div>
-            </div>
+    <section className="summary-grid four-summary" aria-label="기숙사 배정 요약"><article><span>학교 명단 / 실제 응답</span><strong>{schoolRosterSize} / {actualCount}명</strong><small>미응답 {missingCount}명 · 테스트 {testCount}명</small></article><article><span>건물 수용 정원</span><strong>{totalBeds}명</strong><small>{allocation.rooms.length}개 방 · {savedLayout ? "직접 관리" : "자동 구조"}</small></article><article><span>배정 / 자리 부족</span><strong>{assignedCount} / {allocation.waiting.length}명</strong><small>실제 응답 대기 {waitingActual.length}명 · 기본값 배정 {defaultCount}명</small></article><article><span>학년별 수용 정원</span><strong>{gradeBeds.join(" / ")}</strong><small>1학년 / 2학년 / 3학년 · 미응답은 대기 인원과 별도</small></article></section>
+    {allocation.waiting.length > 0 && <section className="waiting-panel"><h2>자리 부족으로 배정 대기</h2><p>해당 학년의 방이나 인실을 늘리면 다시 계산합니다. 실제 응답자부터 배정합니다.</p><div>{allocation.waiting.map(student => <span key={student.student_id}>{student.student_name} · {student.student_id}{student.is_test ? " (테스트)" : student.is_default ? " (기본값)" : " (실제)"}</span>)}</div></section>}
+    {roster.outsideRoster.length > 0 && <p className="notice error">현재 반 수·반당 학생 수 범위를 벗어난 실제 응답: {roster.outsideRoster.map(student => student.student_id).join(", ")}. 학교 명단 설정을 확인해 주세요. 이 응답은 자동 배정에 포함되지 않습니다.</p>}
+
+    <section className="dorm-map school-dorm-map" aria-labelledby="map-title"><div className="map-heading"><div><p className="eyebrow">LIVE ROOM PROPOSAL</p><h2 id="map-title">학년별 건물·층·구역 지도</h2><p>호수 옆 숫자는 10점 만점의 생활 패턴 적합도입니다. 2명 미만은 평가 대기로 표시합니다.</p></div><div className="grade-legend"><span><i className="grade1-dot" />1학년</span><span><i className="grade2-dot" />2학년</span><span><i className="grade3-dot" />3학년</span></div></div>
+      <details className="score-explanation"><summary>적합도 점수는 어떻게 계산하나요?</summary><p>{scoreDescription} 각 방의 학생 쌍별 점수를 평균내며 빈 침대 수는 점수에 반영하지 않습니다. 기본값이 포함된 방은 설문 응답 후 점수가 달라집니다.</p></details>
+      {effectiveLayout.map(building => <div className="building-block" key={building.id}><div className="building-heading"><div><strong>{building.name}</strong>{building.provisional && <span>임시 지도</span>}</div><p>{savedLayout ? "관리자가 저장한 구조" : "명단·기본 인실에 맞춘 자동 구조"}</p></div>
+        {[...building.floors].sort((a, b) => b.floor - a.floor).map(floor => {
+          const left = Array.from({ length: floor.leftRooms }, (_, i) => roomsById.get(building.id + "/" + floor.id + "/left/" + i)!);
+          const right = Array.from({ length: floor.rightRooms }, (_, i) => roomsById.get(building.id + "/" + floor.id + "/right/" + i)!);
+          return <article className="school-floor" key={floor.id}><header><div><strong>{floor.floor}F</strong><span>왼쪽 {floor.leftGrade}학년 · 오른쪽 {floor.rightGrade}학년</span></div><small>{left.length + right.length}개 호실</small></header>
+            <div className="facility-strip"><span>{building.diningSide === "left" ? "식당 방향" : "왼쪽 끝"}</span><b>{facilities(floor, "left")}</b><b>{floor.centerStairs ? "중앙 계단" : "중앙 복도"}</b><b>{facilities(floor, "right")}</b><span>{building.diningSide === "right" ? "식당 방향" : "오른쪽 끝"}</span></div>
+            <div className="wing-labels"><span className={"grade-" + floor.leftGrade}>왼쪽 구역 · {floor.leftGrade}학년 · {floor.leftCapacity}인실</span><i>중앙 복도</i><span className={"grade-" + floor.rightGrade}>오른쪽 구역 · {floor.rightGrade}학년 · {floor.rightCapacity}인실</span></div>
+            <div className="school-room-layout"><div className="room-wing">{left.map(room => <RoomCard room={room} key={room.id} />)}</div><div className="central-corridor"><span>{floor.centerStairs ? "계단" : "복도"}</span><b>{floor.floor}층 중앙</b><span>복도</span></div><div className="room-wing">{right.map(room => <RoomCard room={room} key={room.id} />)}</div></div>
           </article>;
         })}
       </div>)}
     </section>
 
-    <section className="admin-board">
-      <div className="board-heading"><div><h2>학생별 생활 패턴</h2><p>미응답 학생은 지정된 기본값으로 표시하며, 배정 계산에도 같은 값이 적용됩니다.</p></div><span>{schoolRosterSize}명</span></div>
-      <div className="table-wrap"><table className="survey-table expanded-table">
-        <thead><tr><th>구분</th><th>학번</th><th>이름</th><th>학년</th><th>기상</th><th>취침</th><th>주로 씻기</th><th>횟수</th><th>청결</th><th>소음</th><th>조명</th><th>환기</th><th>알람</th><th>활동</th><th>온도</th></tr></thead>
-        <tbody>
-          {!isLoading && rosterStudents.map((student) => <tr key={student.id}><td><span className={student.is_default ? "default-badge" : student.is_test ? "test-badge" : "live-badge"}>{student.is_default ? "기본값" : student.is_test ? "테스트" : "실제"}</span></td><td>{student.student_id}</td><td><strong>{student.student_name}</strong></td><td>{student.grade}학년</td><td>{student.wake_time.slice(0, 5)}</td><td>{student.sleep_time.slice(0, 5)}</td><td>{student.shower_time.slice(0, 5)}</td><td>{student.shower_frequency}회</td><td>{student.tidiness}/5</td><td>{student.noise_sensitivity}/5</td><td>{student.light_sensitivity}/5</td><td>{student.ventilation_preference}/5</td><td>{student.alarm_sensitivity}/5</td><td>{student.room_activity}/5</td><td>{student.preferred_temperature}℃</td></tr>)}
-          {isLoading && <tr><td colSpan={15}><div className="empty-table"><strong>DB에서 설문을 불러오는 중입니다</strong></div></td></tr>}
-        </tbody>
-      </table></div>
+    <section className="admin-board"><div className="board-heading"><div><h2>학생별 생활 패턴</h2><p>미응답 학생은 기본값을 표시합니다. 기본값 배정 옵션을 끄면 응답 도착 전까지 방을 차지하지 않습니다.</p></div><span>{schoolRosterSize}명</span></div>
+      <div className="table-wrap"><table className="survey-table expanded-table"><thead><tr><th>구분</th><th>학번</th><th>이름</th><th>학년</th><th>기상</th><th>취침</th><th>주로 씻기</th><th>횟수</th><th>청결</th><th>소음</th><th>조명</th><th>환기</th><th>알람</th><th>활동</th><th>온도</th></tr></thead><tbody>
+        {!isLoading && roster.allStudents.map(student => <tr key={student.id}><td><span className={student.is_default ? "default-badge" : student.is_test ? "test-badge" : "live-badge"}>{student.is_default ? "미응답" : student.is_test ? "테스트" : "실제"}</span></td><td>{student.student_id}</td><td><strong>{student.student_name}</strong></td><td>{student.grade}학년</td><td>{student.wake_time.slice(0, 5)}</td><td>{student.sleep_time.slice(0, 5)}</td><td>{student.shower_time.slice(0, 5)}</td><td>{student.shower_frequency}회</td><td>{student.tidiness}/5</td><td>{student.noise_sensitivity}/5</td><td>{student.light_sensitivity}/5</td><td>{student.ventilation_preference}/5</td><td>{student.alarm_sensitivity}/5</td><td>{student.room_activity}/5</td><td>{student.preferred_temperature}℃</td></tr>)}
+        {isLoading && <tr><td colSpan={15}><div className="empty-table">DB에서 설문을 불러오는 중입니다</div></td></tr>}
+      </tbody></table></div>
     </section>
   </main>;
 }

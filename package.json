@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test:matching": "tsc lib/roommate-matching.ts lib/student-roster.ts lib/dormitory-layout.ts --strict --target ES2022 --module commonjs --moduleResolution node --skipLibCheck --outDir .codex_tmp/matching-tests && node --test tests/dormitory.test.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",

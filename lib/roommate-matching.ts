@@ -1,4 +1,6 @@
 export type MatchingStudent = {
+  is_test?: boolean;
+  is_default?: boolean;
   student_id: string;
   grade: number;
   wake_time: string;
@@ -91,5 +93,64 @@ export function roomCompatibilityScore<T extends MatchingStudent>(students: T[])
       pairs += 1;
     });
   });
-  return Math.round((total / pairs) * 10);
+  // Maximum same-grade weighted score: 13.85. The shared minimum is -3.5.
+  // Map the complete theoretical range to 0–10, rather than presenting a raw sum.
+  return Math.round(Math.max(0, Math.min(10, ((total / pairs + 3.5) / 17.35) * 10)) * 10) / 10;
+}
+
+export function assignmentPriority(student: MatchingStudent) {
+  return student.is_default ? 2 : student.is_test ? 1 : 0;
+}
+
+/** Recompute the proposal from scratch; capacity is physical, not inferred from responses. */
+export function optimizeRoomAssignments<T extends MatchingStudent>(students: T[], capacities: number[]) {
+  const seatCount = capacities.reduce((sum, value) => sum + value, 0);
+  const ordered = [...students].sort((a, b) => assignmentPriority(a) - assignmentPriority(b) || a.student_id.localeCompare(b.student_id));
+  const remaining = ordered.slice(0, seatCount);
+  const waiting = ordered.slice(seatCount);
+  const scoreCache = new Map<string, number>();
+  function score(a: T, b: T) {
+    const key = [a.student_id, b.student_id].sort().join(":");
+    if (!scoreCache.has(key)) scoreCache.set(key, roommateCompatibility(a, b));
+    return scoreCache.get(key)!;
+  }
+  const rooms = capacities.map((capacity) => {
+    const room: T[] = [];
+    if (remaining.length && capacity > 0) room.push(remaining.shift()!);
+    while (room.length < capacity && remaining.length) {
+      let bestIndex = 0;
+      let bestScore = -Infinity;
+      remaining.forEach((candidate, index) => {
+        const value = room.reduce((total, member) => total + score(member, candidate), 0) / room.length;
+        if (value > bestScore) { bestScore = value; bestIndex = index; }
+      });
+      room.push(remaining.splice(bestIndex, 1)[0]);
+    }
+    return room;
+  });
+  // Improve the greedy proposal using bounded pairwise swaps. Stable ties avoid churn.
+  for (let pass = 0; pass < 3; pass += 1) {
+    let improved = false;
+    for (let first = 0; first < rooms.length; first += 1) {
+      for (let second = first + 1; second < rooms.length; second += 1) {
+        const a = rooms[first]; const b = rooms[second];
+        const aPairs = Math.max(1, a.length * (a.length - 1) / 2);
+        const bPairs = Math.max(1, b.length * (b.length - 1) / 2);
+        let bestGain = 0.0001; let best: [number, number] | null = null;
+        for (let ai = 0; ai < a.length; ai += 1) for (let bi = 0; bi < b.length; bi += 1) {
+          const left = a[ai]; const right = b[bi];
+          const gainA = a.reduce((sum, other, index) => sum + (index === ai ? 0 : score(right, other) - score(left, other)), 0) / aPairs;
+          const gainB = b.reduce((sum, other, index) => sum + (index === bi ? 0 : score(left, other) - score(right, other)), 0) / bPairs;
+          if (gainA + gainB > bestGain) { bestGain = gainA + gainB; best = [ai, bi]; }
+        }
+        if (best) {
+          const [ai, bi] = best;
+          [a[ai], b[bi]] = [b[bi], a[ai]];
+          improved = true;
+        }
+      }
+    }
+    if (!improved) break;
+  }
+  return { rooms, waiting };
 }

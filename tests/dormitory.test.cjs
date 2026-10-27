@@ -169,3 +169,15 @@ test('large generated floors keep unique room numbers across one and two digit f
   assert.equal(validateLayout([{id:'a',name:'A',diningSide:'none',floors}]),null);
   assert(floors[0].grid.spaces.some(s=>s.number==='1-100'));
 });
+
+test('converting a legacy map or moving only its room tiles leaves student assignments unchanged',()=>{
+  const floor={...newFloor(2,2,2),leftRooms:4,rightRooms:4};
+  const students=createDefaultRoster(1,12).filter(s=>s.grade===2);
+  const makeLayout=f=>[{id:'a',name:'A',diningSide:'none',floors:[f]}];
+  const initial=allocateDormitory(students,makeLayout(floor));
+  const grid=gridFromLegacyFloor(floor);
+  const converted=allocateDormitory(students,makeLayout({...floor,grid}));
+  assert.deepEqual(converted,initial);
+  const moved=moveGridSpace(grid,'left/0',3,0);
+  assert.deepEqual(allocateDormitory(students,makeLayout({...floor,grid:moved})),initial);
+});

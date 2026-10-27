@@ -16,7 +16,7 @@ export type DormLayout = BuildingLayout[];
 export type AssignedRoom<T> = { id: string; number: string; grade: Grade; capacity: number; students: T[]; score: number | null };
 
 export function floorRooms(floor: FloorLayout) {
-  if (floor.grid) return floor.grid.spaces.filter(space => space.kind === "room").map(space => ({ id:space.id, number:space.number!,grade:space.grade!,capacity:space.capacity! }));
+  if (floor.grid) return floor.grid.spaces.filter(space => space.kind === "room").map(space => ({ id:space.id, number:space.number!,grade:space.grade!,capacity:space.capacity! })).sort((a,b)=>a.number.localeCompare(b.number,"ko",{numeric:true})||a.id.localeCompare(b.id));
   return (["left", "right"] as const).flatMap(wing => Array.from({ length:floor[`${wing}Rooms`] }, (_, index) => ({ id:`${wing}/${index}`,number:`${floor.floor}${String(index + 1 + (wing === "right" ? floor.leftRooms : 0)).padStart(2,"0")}`,grade:floor[`${wing}Grade`],capacity:floor[`${wing}Capacity`] })));
 }
 

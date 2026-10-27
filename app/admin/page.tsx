@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useMemo, useState } from "react";
 import { matchRoommates, roomCompatibilityScore } from "@/lib/roommate-matching";
 import { supabase } from "@/lib/supabase/client";
+import { Icon } from "@/components/icon";
 
 type SurveyRow = {
   id: string;
@@ -257,7 +258,7 @@ export default function AdminPage() {
 
   if (!isAuthenticated) return <main className="admin-login-page">
     <form className="admin-login-card" onSubmit={signIn}>
-      <div className="login-symbol" aria-hidden="true">⌁</div><p className="eyebrow">MANAGER ACCESS</p><h1>관리자 인증</h1>
+      <div className="login-symbol"><Icon name="shield" size={25} /></div><p className="eyebrow">MANAGER ACCESS</p><h1>관리자 인증</h1>
       <p>기숙사 배정 관리 화면은 관리자 인증키 확인 후 이용할 수 있습니다.</p>
       <label><span>관리자 인증키</span><input type="password" name="schoolKey" autoComplete="off" placeholder="인증키를 입력하세요" required /></label>
       {authError && <p className="login-error" role="alert">{authError}</p>}

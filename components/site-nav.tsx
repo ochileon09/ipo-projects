@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ReactNode, useEffect, useState } from "react";
+import { Icon, type IconName } from "@/components/icon";
 
 const links = [
-  { href: "/", label: "대시보드", icon: "▦" },
-  { href: "/student", label: "학생 설문 신청", icon: "✓" },
-  { href: "/admin", label: "기숙사 배정 관리", icon: "⌂" },
+  { href: "/", label: "대시보드", icon: "dashboard" as IconName },
+  { href: "/student", label: "학생 설문 신청", icon: "survey" as IconName },
+  { href: "/admin", label: "기숙사 배정 관리", icon: "building" as IconName },
 ];
 
 export function SiteShell({ children }: { children: ReactNode }) {
@@ -22,7 +23,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
   function toggleTheme() {
     const nextTheme = theme === "light" ? "dark" : "light";
     document.documentElement.dataset.theme = nextTheme;
-    localStorage.setItem("roomfit-theme", nextTheme);
+    try { localStorage.setItem("roomfit-theme", nextTheme); } catch { /* 저장소를 사용할 수 없어도 테마는 전환합니다. */ }
     setTheme(nextTheme);
   }
 
@@ -30,14 +31,13 @@ export function SiteShell({ children }: { children: ReactNode }) {
     <div className="app-shell">
       <header className="shell-topbar">
         <Link className="brand" href="/" aria-label="ROOMFIT 홈">
-          <span className="brand-mark">R</span>
-          <span>ROOMFIT</span>
+          <span className="brand-mark"><Icon name="building" size={21} /></span>
+          <span>roomfit<span className="brand-period">.</span></span>
         </Link>
         <div className="shell-top-actions">
-          <span className="service-state"><i />시스템 운영 중</span>
-          <span className="notification-mark" aria-hidden="true">●</span>
+          <span className="service-state">더 편안한 기숙사 생활</span>
           <button className="theme-toggle" type="button" onClick={toggleTheme} aria-label={theme === "light" ? "다크 테마로 변경" : "라이트 테마로 변경"} title={theme === "light" ? "다크 테마" : "라이트 테마"}>
-            <span aria-hidden="true">{theme === "light" ? "☾" : "☀"}</span>
+            <Icon name={theme === "light" ? "moon" : "sun"} size={18} />
             <b>{theme === "light" ? "다크" : "라이트"}</b>
           </button>
         </div>
@@ -48,19 +48,17 @@ export function SiteShell({ children }: { children: ReactNode }) {
           <p className="sidebar-label">서비스</p>
           {links.map((link) => {
             const isActive = link.href === "/" ? pathname === "/" : pathname.startsWith(link.href);
-            return <Link className={isActive ? "active" : ""} href={link.href} key={link.href}>
-              <span aria-hidden="true">{link.icon}</span>
+            return <Link className={isActive ? "active" : ""} href={link.href} key={link.href} aria-current={isActive ? "page" : undefined}>
+              <span><Icon name={link.icon} size={19} /></span>
               <b>{link.label}</b>
             </Link>;
           })}
-          <p className="sidebar-label sidebar-label-secondary">안내</p>
-          <div className="sidebar-static"><span aria-hidden="true">?</span><b>이용 안내</b></div>
-          <div className="sidebar-static"><span aria-hidden="true">↻</span><b>업데이트 내역</b></div>
         </nav>
         <footer>
-          <strong>ROOMFIT</strong>
-          <span>기숙사 생활 습관 기반 호실 배정</span>
-          <small>2026 정보과학 프로젝트</small>
+          <span className="sidebar-footer-icon"><Icon name="shield" size={20} /></span>
+          <strong>함께 쓰는 방, 더 잘 맞게.</strong>
+          <span>생활 습관을 고려한<br />우리 학교 기숙사 배정</span>
+          <small>ROOMFIT · 2026</small>
         </footer>
       </aside>
 

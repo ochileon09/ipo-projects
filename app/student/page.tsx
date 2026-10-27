@@ -24,7 +24,7 @@ export default function StudentApplicationPage() {
   useEffect(() => {
     async function checkConnection() {
       const { data, error } = await supabase.rpc("check_student_surveys_ready");
-      setConnection(!error && data === true ? "Supabase DB 준비됨" : "DB 연결 확인 필요");
+      setConnection(!error && data === true ? "설문 접수 가능" : "연결 확인 필요");
     }
     void checkConnection();
   }, []);
@@ -62,7 +62,7 @@ export default function StudentApplicationPage() {
     });
     setIsSaving(false);
     if (error) { setNotice(`저장 실패: ${error.message}`); return; }
-    setNotice("설문 응답이 Supabase에 안전하게 저장되었습니다.");
+    setNotice("설문이 제출되었습니다. 응답한 생활 습관을 호실 배정에 반영할게요.");
     setStudentId(""); setTemperature(22); form.reset();
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -71,7 +71,7 @@ export default function StudentApplicationPage() {
     <header className="hero">
       <div className="hero-copy"><p className="eyebrow">학생 신청용</p><h1>기숙사 생활 습관<br />설문 신청</h1>
         <p className="lead">호실 배정에 필요한 기본 정보와 생활 습관을 입력합니다. 입력한 내용은 이후 룸메이트 배정에 활용됩니다.</p></div>
-      <div className="hero-card" aria-label="개발 현황"><span className="status-dot" /><div><strong>{connection}</strong><p>3차시 · 설문 입력 및 확인</p></div></div>
+      <div className="hero-card" aria-label="설문 접수 상태"><span className="status-dot" /><div><strong>{connection}</strong><p>작성 후 제출 버튼을 눌러주세요</p></div></div>
     </header>
 
     {notice && <p className={`notice ${notice.startsWith("저장 실패") || notice.startsWith("이름") ? "error" : "success"}`} role="status">{notice}</p>}
@@ -108,7 +108,7 @@ export default function StudentApplicationPage() {
         </div>
         <label className="wide-label"><span>방 위치 배려가 필요한 신체적 사유 <b className="optional-mark">(선택)</b></span><textarea name="accessibility" rows={3} placeholder="없으면 비워 두어도 됩니다." maxLength={500} /></label>
       </section>
-      <div className="form-footer"><p>설문 제출 버튼을 누르면 입력한 내용이 Supabase 데이터베이스에 저장됩니다.</p><button type="submit" disabled={isSaving}>{isSaving ? "저장 중..." : "설문 제출"}</button></div>
+      <div className="form-footer"><p>제출한 생활 습관은 룸메이트와 호실 배정에 활용됩니다.</p><button type="submit" disabled={isSaving}>{isSaving ? "제출 중..." : "설문 제출하기"}</button></div>
     </form>
   </main>;
 }

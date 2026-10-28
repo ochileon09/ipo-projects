@@ -26,6 +26,7 @@ begin
   if not exists(select 1 from public.get_student_surveys_for_admin_by_key('12345') where id=newer.survey_id and wake_time='08:10'::time) then raise exception 'Newest response was lost'; end if;
   if (select count(*) from realtime.messages where topic='roomfit-admin-refresh') <= before_messages then raise exception 'Realtime refresh triggers did not emit'; end if;
   if has_table_privilege('anon','public.student_surveys','select') or has_table_privilege('anon','public.student_surveys','update') or has_table_privilege('anon','public.student_surveys','delete') then raise exception 'Student table was exposed'; end if;
+  if has_function_privilege('anon','public.get_student_surveys_for_admin()','execute') or has_function_privilege('authenticated','public.get_student_surveys_for_admin()','execute') or has_function_privilege('authenticated','public.seed_test_student_surveys()','execute') then raise exception 'Internal survey helpers were exposed'; end if;
 end;
 $$;
 select 'PASS: delete, restore, repeated deletion, resubmission, conflict protection, test filling, realtime signals, access control; all changes rolled back' as verification;

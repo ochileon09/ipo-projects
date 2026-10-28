@@ -519,6 +519,31 @@ tbody tr:hover { background: var(--shell-panel-soft); }
 .grid-room-occupants b { font-size:11px; overflow-wrap:anywhere; }
 .grid-room-occupants small, .grid-room-occupants em { color:var(--shell-muted); font-size:9px; font-style:normal; }
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+.admin-sync-meta { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-top:12px; color:var(--shell-muted); font-size:11px; }
+.admin-sync-meta > small { font-size:10px; }
+.sync-state { display:inline-flex; align-items:center; gap:6px; }
+.sync-state i { width:6px; height:6px; border-radius:50%; background:var(--shell-muted); }
+.sync-state.connected i { background:var(--success-text); }
+.admin-actions { flex-wrap:wrap; }
+.admin-action-feedback { flex-basis:100%; min-height:18px; text-align:right; color:var(--shell-muted); font-size:11px; }
+.roster-row-reason { display:block; margin-top:5px; color:var(--shell-muted); font-size:10px; }
+.survey-row-delete { min-height:32px; padding:5px 10px; border:1px solid color-mix(in srgb,var(--error-text) 30%,var(--shell-border)); background:transparent; color:var(--error-text); font-size:11px; white-space:nowrap; }
+.survey-row-delete:hover { background:var(--error-bg); }
+.survey-row-restore { min-height:32px; padding:5px 10px; font-size:11px; }
+.received-surveys th:last-child, .received-surveys td:last-child, .deleted-survey-history th:last-child, .deleted-survey-history td:last-child { position:sticky; right:0; min-width:68px; border-left:1px solid var(--shell-border); background:var(--shell-panel); }
+.received-surveys th:last-child, .deleted-survey-history th:last-child { background:var(--shell-panel-soft); }
+.survey-delete-dialog { width:min(460px,calc(100% - 36px)); padding:28px; border:1px solid var(--shell-border); border-radius:16px; background:var(--shell-panel); color:var(--shell-text); box-shadow:0 24px 80px #0004; }
+.survey-delete-dialog::backdrop { background:#050b18a6; backdrop-filter:blur(3px); }
+.survey-delete-dialog h2 { margin-bottom:18px; }
+.survey-delete-dialog p { font-size:13px; line-height:1.9; color:var(--shell-muted); }
+.survey-delete-dialog strong { color:var(--shell-text); }
+.dialog-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:24px; }
+.delete-survey-confirm { background:var(--error-text); color:var(--shell-panel); }
+.delete-survey-confirm:hover { background:var(--error-text); filter:brightness(.9); }
+.deleted-survey-history { margin-top:16px; padding:16px 20px; border:1px solid var(--shell-border); border-radius:12px; background:var(--shell-panel); }
+.deleted-survey-history summary { cursor:pointer; font-size:12px; font-weight:600; }
+.deleted-survey-history summary span { margin-left:8px; color:var(--shell-muted); font-weight:400; }
+.deleted-survey-history > p { color:var(--shell-muted); font-size:12px; line-height:1.8; }
 @media(max-width:800px) { .grid-designer-intro { flex-direction:column; } .floor-editor-title { flex-wrap:wrap; } .draft-capacity { grid-template-columns:1fr; } .grid-map-scroll { padding:8px; } .building-editor { min-width:0; } }
 @media (max-width: 980px) { .wing-editor-grid { grid-template-columns: 1fr; } }
 @media (max-width: 600px) {

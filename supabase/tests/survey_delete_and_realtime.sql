@@ -1,4 +1,4 @@
--- Run after 20261028_realtime_surveys_and_admin_delete.sql. Everything rolls back.
+-- Run after 20261028_z_reuse_deleted_survey_identity.sql. Everything rolls back.
 begin;
 do $$
 declare
@@ -20,9 +20,8 @@ begin
   perform public.seed_test_student_surveys();
   if not exists(select 1 from public.student_surveys where student_id='1101' and is_test_data and deleted_at is null) then raise exception 'Deleted real response prevented test-mode filling'; end if;
   select * into newer from public.submit_student_survey(payload || '{"wake_time":"08:10"}');
-  if newer.survey_id=original.survey_id or newer.was_updated then raise exception 'New response overwrote deleted history'; end if;
-  rejected:=false; begin perform public.restore_student_survey_by_key('12345',original.survey_id); exception when unique_violation then rejected:=true; end;
-  if not rejected then raise exception 'Recovery overwrote a newer response'; end if;
+  if newer.survey_id<>original.survey_id or not newer.was_updated then raise exception 'Resubmission should reuse the same identity row'; end if;
+  if public.restore_student_survey_by_key('12345',original.survey_id) then raise exception 'Resubmitted active survey must not be restored again'; end if;
   if not exists(select 1 from public.get_student_surveys_for_admin_by_key('12345') where id=newer.survey_id and wake_time='08:10'::time) then raise exception 'Newest response was lost'; end if;
   if (select count(*) from realtime.messages where topic='roomfit-admin-refresh') <= before_messages then raise exception 'Realtime refresh triggers did not emit'; end if;
   if has_table_privilege('anon','public.student_surveys','select') or has_table_privilege('anon','public.student_surveys','update') or has_table_privilege('anon','public.student_surveys','delete') then raise exception 'Student table was exposed'; end if;

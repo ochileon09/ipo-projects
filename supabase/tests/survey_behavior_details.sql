@@ -12,6 +12,12 @@ begin
   if (select count(*) from public.student_surveys where student_id='1930' and student_name='__문항검증A__' and superseded_at is null and deleted_at is null)<>1 then raise exception '중복 응답이 생성되었습니다.'; end if;
   perform public.submit_student_survey(payload-'shower_duration_minutes'-'night_noise_activity'-'night_light_usage'-'alarm_repeats');
   if (select shower_duration_minutes<>30 or alarm_repeats<>5 from public.student_surveys where id=first_id) then raise exception '이전 버전 앱의 제출이 새 응답을 지웠습니다.'; end if;
+  perform public.delete_student_survey_by_key('12345',first_id);
+  select * into receipt from public.submit_student_survey(payload);
+  if receipt.survey_id<>first_id or not receipt.was_updated then raise exception '삭제 후 재제출은 원래 행을 재사용해야 합니다.'; end if;
+  if (select count(*) from public.student_surveys where student_id='1930' and student_name='__문항검증A__')<>1 then raise exception '삭제 후 재제출이 중복 행을 만들었습니다.'; end if;
+  if (select deleted_at is not null from public.student_surveys where id=first_id) then raise exception '재제출 응답이 삭제 상태로 남았습니다.'; end if;
+  perform public.submit_student_survey(payload||'{"shower_duration_minutes":30}'::jsonb);
   perform public.submit_student_survey(payload||'{"student_id":"1929"}'::jsonb);
   perform public.submit_student_survey(payload||'{"student_name":"__문항검증B__"}'::jsonb);
   if (select count(*) from public.student_surveys where student_name in ('__문항검증A__','__문항검증B__'))<>3 then raise exception '학번 또는 이름 하나만 같은 학생이 합쳐졌습니다.'; end if;

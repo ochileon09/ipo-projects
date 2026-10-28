@@ -6,9 +6,10 @@ const { selectRoster, createDefaultRoster } = require('../.codex_tmp/matching-te
 const { createFloorGrid, expandSelection, paintGrid, mergeGrid, splitGrid, moveGridSpace, validateFloorGrid } = require('../.codex_tmp/matching-tests/floor-grid.js');
 const { floorRooms, gridFromLegacyFloor } = require('../.codex_tmp/matching-tests/dormitory-layout.js');
 const { planManualMove } = require('../.codex_tmp/matching-tests/dormitory-layout.js');
+const { roommateCompatibility, showerOverlapMinutes, hasDetailedHabits } = require('../.codex_tmp/matching-tests/roommate-matching.js');
 
 function student(studentId, overrides = {}) {
-  return { ...createDefaultRoster(6, 16).find(row => row.student_id === studentId), id: studentId, is_default: false, student_name: '학생' + studentId, created_at: '2026-10-01T00:00:00Z', ...overrides };
+  return { ...createDefaultRoster(6, 16).find(row => row.student_id === studentId), id: studentId, is_default: false, student_name: '학생' + studentId, created_at: '2026-10-01T00:00:00Z', shower_duration_minutes:10,night_noise_activity:1,night_light_usage:1,alarm_repeats:0,...overrides };
 }
 
 test('scores stay within 0–10 and distinguish overlapping showers; single occupancy is not rated', () => {
@@ -23,6 +24,39 @@ test('scores stay within 0–10 and distinguish overlapping showers; single occu
     const score = roomCompatibilityScore([a, { ...b, shower_time: String(i).padStart(2,'0') + ':00', tidiness: 1, noise_sensitivity: 5 }]);
     assert(score >= 0 && score <= 10);
   }
+});
+
+test('showers use occupied intervals and midnight wrap; non-overlapping morning and evening slots score equally',()=>{
+  const a=student('2101',{shower_time:'07:40',shower_duration_minutes:10});
+  const b=student('2102',{shower_time:'07:55',shower_duration_minutes:10});
+  assert.equal(showerOverlapMinutes(a,b),0);
+  assert.equal(roomCompatibilityScore([a,b]),roomCompatibilityScore([a,{...b,shower_time:'22:00'}]));
+  assert.equal(showerOverlapMinutes({...a,shower_duration_minutes:30},b),10);
+  assert.equal(showerOverlapMinutes(a,{...b,shower_time:'07:50'}),0);
+  assert.equal(showerOverlapMinutes({...a,shower_time:'23:50',shower_duration_minutes:30},{...b,shower_time:'00:05'}),10);
+});
+
+test('night noise and light are evaluated against the other student sensitivity, symmetrically',()=>{
+  const sleeper=student('2101',{noise_sensitivity:5,light_sensitivity:5});
+  const quiet=student('2102',{shower_time:'22:00'});
+  const noisy={...quiet,night_noise_activity:5};const bright={...quiet,night_light_usage:5};
+  assert(roommateCompatibility(sleeper,quiet)>roommateCompatibility(sleeper,noisy));
+  assert(roommateCompatibility(sleeper,quiet)>roommateCompatibility(sleeper,bright));
+  assert.equal(roommateCompatibility(sleeper,noisy),roommateCompatibility(noisy,sleeper));
+  const tolerant={...sleeper,noise_sensitivity:1};
+  assert.equal(roommateCompatibility(tolerant,quiet),roommateCompatibility(tolerant,noisy));
+});
+
+test('repeated alarms matter while a roommate is asleep, and unanswered habits stay explicitly unknown',()=>{
+  const early=student('2101',{wake_time:'07:00',alarm_repeats:1});
+  const late=student('2102',{wake_time:'08:00',alarm_sensitivity:5,shower_time:'22:00'});
+  assert(roommateCompatibility(early,late)>roommateCompatibility({...early,alarm_repeats:5},late));
+  const sameWake={...late,wake_time:'07:00'};
+  assert.equal(roommateCompatibility(early,sameWake),roommateCompatibility({...early,alarm_repeats:5},sameWake));
+  const legacy={...early,shower_duration_minutes:null,night_noise_activity:null,night_light_usage:null,alarm_repeats:null};
+  assert(!hasDetailedHabits(legacy));assert(hasDetailedHabits(early));
+  assert(Number.isFinite(roomCompatibilityScore([legacy,late])));
+  assert.equal(createDefaultRoster(1,1)[0].shower_duration_minutes,null);
 });
 
 test('real response beats a newer test response and repeated real responses use newest', () => {

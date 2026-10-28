@@ -14,6 +14,10 @@ export type MatchingStudent = {
   ventilation_preference: number;
   alarm_sensitivity: number;
   room_activity: number;
+  shower_duration_minutes?: number | null;
+  night_noise_activity?: number | null;
+  night_light_usage?: number | null;
+  alarm_repeats?: number | null;
 };
 
 function timeToMinutes(value: string) {
@@ -30,28 +34,41 @@ function similarity(first: number, second: number, range: number) {
   return Math.max(0, 1 - Math.abs(first - second) / range);
 }
 
-export function roommateCompatibility(first: MatchingStudent, second: MatchingStudent) {
-  const wakeSimilarity = similarity(circularTimeDifference(first.wake_time, second.wake_time), 0, 180);
-  const sleepSimilarity = similarity(circularTimeDifference(first.sleep_time, second.sleep_time), 0, 240);
-  const showerGap = circularTimeDifference(first.shower_time, second.shower_time);
-  const showerSeparation = Math.min(1, showerGap / 240);
-  const showerConflictPenalty = showerGap < 45 ? 3.5 * (1 - showerGap / 45) : 0;
+export function hasDetailedHabits(student: MatchingStudent) {
+  return [student.shower_duration_minutes, student.night_noise_activity, student.night_light_usage, student.alarm_repeats].every(value => value != null);
+}
 
-  return (
-    wakeSimilarity * 1.2 +
-    sleepSimilarity * 1.4 +
-    similarity(first.tidiness, second.tidiness, 4) * 1.1 +
-    similarity(first.noise_sensitivity, second.noise_sensitivity, 4) * 1.4 +
-    similarity(first.preferred_temperature, second.preferred_temperature, 8) * 0.8 +
-    similarity(first.light_sensitivity, second.light_sensitivity, 4) * 1.0 +
-    similarity(first.ventilation_preference, second.ventilation_preference, 4) * 0.8 +
-    similarity(first.alarm_sensitivity, second.alarm_sensitivity, 4) * 1.0 +
-    similarity(first.room_activity, second.room_activity, 4) * 0.8 +
-    similarity(first.shower_frequency, second.shower_frequency, 2) * 0.3 +
-    (first.grade === second.grade ? 0.25 : 0) +
-    showerSeparation * 3.8 -
-    showerConflictPenalty
-  );
+export function showerOverlapMinutes(first: MatchingStudent, second: MatchingStudent) {
+  const start = timeToMinutes(first.shower_time);
+  const otherStart = timeToMinutes(second.shower_time);
+  const duration = first.shower_duration_minutes ?? 15;
+  const otherDuration = second.shower_duration_minutes ?? 15;
+  return Math.max(...[-1440, 0, 1440].map(offset => Math.max(0,
+    Math.min(start + duration, otherStart + offset + otherDuration) - Math.max(start, otherStart + offset))));
+}
+
+function disturbance(activity: number | null | undefined, sensitivity: number) {
+  return ((activity ?? 3) - 1) / 4 * (sensitivity - 1) / 4;
+}
+
+function alarmDisturbance(source: MatchingStudent, sleeper: MatchingStudent) {
+  const sinceBedtime = (timeToMinutes(source.wake_time) - timeToMinutes(sleeper.sleep_time) + 1440) % 1440;
+  const sleepLength = (timeToMinutes(sleeper.wake_time) - timeToMinutes(sleeper.sleep_time) + 1440) % 1440;
+  if (sinceBedtime >= sleepLength) return 0;
+  return (source.alarm_repeats ?? 2) / 5 * (sleeper.alarm_sensitivity - 1) / 4;
+}
+
+export function roommateCompatibility(first: MatchingStudent, second: MatchingStudent) {
+  const showerConflict = showerOverlapMinutes(first, second) / Math.min(first.shower_duration_minutes ?? 15, second.shower_duration_minutes ?? 15);
+  const noise = 1 - (disturbance(first.night_noise_activity, second.noise_sensitivity) + disturbance(second.night_noise_activity, first.noise_sensitivity)) / 2;
+  const light = 1 - (disturbance(first.night_light_usage, second.light_sensitivity) + disturbance(second.night_light_usage, first.light_sensitivity)) / 2;
+  const alarm = 1 - (alarmDisturbance(first, second) + alarmDisturbance(second, first)) / 2;
+  return similarity(circularTimeDifference(first.wake_time, second.wake_time), 0, 180) * 1.2
+    + similarity(circularTimeDifference(first.sleep_time, second.sleep_time), 0, 240) * 1.4
+    + similarity(first.tidiness, second.tidiness, 4) * 1.1
+    + similarity(first.preferred_temperature, second.preferred_temperature, 8) * 0.8
+    + similarity(first.ventilation_preference, second.ventilation_preference, 4) * 0.8
+    + noise * 1.8 + light * 1.4 + alarm * 1.0 + (1 - showerConflict) * 2.0;
 }
 
 export function matchRoommates<T extends MatchingStudent>(students: T[], roomCapacity: number) {
@@ -93,9 +110,8 @@ export function roomCompatibilityScore<T extends MatchingStudent>(students: T[])
       pairs += 1;
     });
   });
-  // Maximum same-grade weighted score: 13.85. The shared minimum is -3.5.
-  // Map the complete theoretical range to 0–10, rather than presenting a raw sum.
-  return Math.round(Math.max(0, Math.min(10, ((total / pairs + 3.5) / 17.35) * 10)) * 10) / 10;
+  // Each component is in [0, 1]; the weights sum to 11.5.
+  return Math.round(Math.max(0, Math.min(10, total / pairs / 11.5 * 10)) * 10) / 10;
 }
 
 export function assignmentPriority(student: MatchingStudent) {

@@ -10,8 +10,9 @@ import { useAdminRealtime } from "@/lib/supabase/use-admin-realtime";
 import { StudentBed, StudentPlacementProvider } from "@/components/student-bed";
 import { allocateDormitory, createDefaultLayout, validateLayout, planManualMove, type AssignedRoom, type BedAddress, type ManualAssignment, type DormLayout, type FloorLayout } from "@/lib/dormitory-layout";
 import { isSchoolStudentId, selectRoster, type SurveyRow } from "@/lib/student-roster";
+import { hasDetailedHabits } from "@/lib/roommate-matching";
 
-const scoreDescription = "0~10점 생활 패턴 적합도: 취침·기상·청결·소음·온도·조명·환기·알람·활동의 유사성과 샤워 시간 분산을 가중 합산한 뒤 정규화합니다. 모든 조합 중 수학적 최적임을 보장하는 값은 아닙니다.";
+const scoreDescription = "0~10점 생활 패턴 적합도: 취침·기상·청결·온도·환기, 샤워 사용 구간의 겹침, 야간 소음·조명 습관이 상대의 민감도에 주는 영향, 수면 중 알람을 함께 계산합니다. 추가 문항 미응답은 샤워 15분·야간 행동 3/5·알람 2회로 임시 계산합니다. 모든 조합 중 수학적 최적임을 보장하는 값은 아닙니다.";
 type SchoolSettings = { classCount: number; studentsPerClass: number; roomCapacity: number };
 type DeletedSurvey = { id: string; student_id: string; student_name: string; deleted_at: string };
 
@@ -22,7 +23,7 @@ function RoomCard({ room }: { room: AssignedRoom<SurveyRow> }) {
     <div className="compact-bed-list">{Array.from({ length: room.capacity }, (_, bedIndex) => {
       return <StudentBed key={bedIndex} roomId={room.id} roomNumber={room.number} grade={room.grade} bedIndex={bedIndex} student={room.beds[bedIndex]} />;
     })}</div>
-    <small className="match-score">{uncertain ? "기본값 포함 · 응답 후 점수 변경" : room.students.length > 1 ? "생활 패턴 적합도" : "룸메이트 응답 후 점수 산출"}</small>
+    <small className="match-score">{uncertain ? "기본값 포함 · 응답 후 점수 변경" : room.students.some(student=>!hasDetailedHabits(student)) ? "추가 문항 미응답 · 임시 점수" : room.students.length > 1 ? "생활 패턴 적합도" : "룸메이트 응답 후 점수 산출"}</small>
   </section>;
 }
 
@@ -256,7 +257,7 @@ export default function AdminPage() {
     <div className="page-kicker">사감 관리용</div>
     <div className="admin-title-row"><div><h1>기숙사 배정 지도</h1><p className="page-lead">새 응답이 들어오면 전체 조합을 다시 계산합니다. 현재 위치는 확정 배정이 아닌 임시 제안입니다.</p><div className="admin-sync-meta"><span className={"sync-state " + syncState} role="status" aria-label="동기화 상태"><i />{syncState === "connected" ? "실시간 연결됨" : syncState === "connecting" ? "실시간 연결 중" : "연결 복구 중"}</span><small>{updatedAt ? "최근 반영 " + updatedAt : "데이터 확인 중"}{movedCount > 0 ? " · " + movedCount + "명 배정 변경" : ""}</small></div></div><div className="admin-actions"><button className="secondary-button" onClick={signOut} disabled={!!changingSurveyId}>로그아웃</button><button onClick={() => void loadDashboard(adminKey, true)} disabled={isLoading}>{isLoading ? "불러오는 중..." : "DB 새로고침"}</button><span className="admin-action-feedback" role="status">{settingsNotice}</span></div></div>
     {errorMessage && <p className="notice error" role="alert">{errorMessage}</p>}
-    <section className="matching-policy" aria-label="배정 기준"><div><span>실제 응답 우선</span><strong>동일 학번은 실제 응답으로 대체 · 부족한 자리도 실제 응답자 우선</strong></div><div><span>학년 분리</span><strong>구역에 지정한 학년만 배정 · 다른 학년끼리 같은 방 사용 안 함</strong></div><div><span>10점 적합도</span><strong>생활 패턴 유사성과 샤워 시간 분산을 함께 계산</strong></div><div><span>유동적인 임시 배정</span><strong>새 설문에 따라 기존 학생의 방과 룸메이트도 바뀔 수 있음</strong></div></section>
+      <section className="matching-policy" aria-label="배정 기준"><div><span>실제 응답 우선</span><strong>동일 학번은 실제 응답으로 대체 · 부족한 자리도 실제 응답자 우선</strong></div><div><span>학년 분리</span><strong>구역에 지정한 학년만 배정 · 다른 학년끼리 같은 방 사용 안 함</strong></div><div><span>10점 적합도</span><strong>샤워 구간 충돌 · 야간 소음·조명 · 알람 반복을 함께 계산</strong></div><div><span>유동적인 임시 배정</span><strong>새 설문에 따라 기존 학생의 방과 룸메이트도 바뀔 수 있음</strong></div></section>
 
     <section className="capacity-panel" aria-labelledby="capacity-title"><div><p className="eyebrow">SCHOOL ROSTER</p><h2 id="capacity-title">학교 명단과 기본 인실</h2><p>전체 명단 = 3개 학년 × 반 수 × 반당 학생 수. {savedLayout ? "직접 관리 구조에서는 아래 인실이 자동으로 방 구조를 덮어쓰지 않습니다." : "자동 구조에서는 명단과 인실에 맞춰 방 수를 계산합니다."}</p></div>
       <form className="capacity-form" onSubmit={saveSettings}>
@@ -310,10 +311,10 @@ export default function AdminPage() {
     </section>
     </StudentPlacementProvider>
 
-    <section className="admin-board"><div className="board-heading"><div><h2>학생별 생활 패턴</h2><p>미응답 학생은 기본값을 표시합니다. 기본값 배정 옵션을 끄면 응답 도착 전까지 방을 차지하지 않습니다.</p></div><span>{schoolRosterSize}명</span></div>
-      <div className="table-wrap"><table className="survey-table expanded-table"><thead><tr><th>구분</th><th>학번</th><th>이름</th><th>학년</th><th>기상</th><th>취침</th><th>주로 씻기</th><th>횟수</th><th>청결</th><th>소음</th><th>조명</th><th>환기</th><th>알람</th><th>활동</th><th>온도</th></tr></thead><tbody>
-        {!isLoading && roster.allStudents.map(student => <tr key={student.id}><td><span className={student.is_default ? "default-badge" : student.is_test ? "test-badge" : "live-badge"}>{student.is_default ? "미응답" : student.is_test ? "테스트" : "실제"}</span></td><td>{student.student_id}</td><td><strong>{student.student_name}</strong></td><td>{student.grade}학년</td><td>{student.wake_time.slice(0, 5)}</td><td>{student.sleep_time.slice(0, 5)}</td><td>{student.shower_time.slice(0, 5)}</td><td>{student.shower_frequency}회</td><td>{student.tidiness}/5</td><td>{student.noise_sensitivity}/5</td><td>{student.light_sensitivity}/5</td><td>{student.ventilation_preference}/5</td><td>{student.alarm_sensitivity}/5</td><td>{student.room_activity}/5</td><td>{student.preferred_temperature}℃</td></tr>)}
-        {isLoading && <tr><td colSpan={15}><div className="empty-table">DB에서 설문을 불러오는 중입니다</div></td></tr>}
+    <section className="admin-board"><div className="board-heading"><div><h2>학생별 생활 패턴</h2><p>추가 문항에 아직 답하지 않은 값은 미응답으로 표시합니다. 야간 활동 빈도는 1(전혀 없음)~5(거의 매일)입니다. 미응답 학생의 기본값 배정은 운영 옵션에 따릅니다.</p></div><span>{schoolRosterSize}명</span></div>
+      <div className="table-wrap"><table className="survey-table expanded-table"><thead><tr><th>구분</th><th>학번</th><th>이름</th><th>학년</th><th>기상</th><th>취침</th><th>주로 씻기</th><th>샤워 소요</th><th>횟수</th><th>청결</th><th>소음</th><th>조명</th><th>환기</th><th>알람 민감도</th><th>야간 소음</th><th>야간 조명</th><th>알람 횟수</th><th>온도</th></tr></thead><tbody>
+        {!isLoading && roster.allStudents.map(student => <tr key={student.id}><td><span className={student.is_default ? "default-badge" : student.is_test ? "test-badge" : "live-badge"}>{student.is_default ? "미응답" : student.is_test ? "테스트" : "실제"}</span></td><td>{student.student_id}</td><td><strong>{student.student_name}</strong></td><td>{student.grade}학년</td><td>{student.wake_time.slice(0, 5)}</td><td>{student.sleep_time.slice(0, 5)}</td><td>{student.shower_time.slice(0, 5)}</td><td>{student.shower_duration_minutes==null?"미응답":student.shower_duration_minutes+"분"}</td><td>{student.shower_frequency}회</td><td>{student.tidiness}/5</td><td>{student.noise_sensitivity}/5</td><td>{student.light_sensitivity}/5</td><td>{student.ventilation_preference}/5</td><td>{student.alarm_sensitivity}/5</td><td>{student.night_noise_activity==null?"미응답":student.night_noise_activity+"/5"}</td><td>{student.night_light_usage==null?"미응답":student.night_light_usage+"/5"}</td><td>{student.alarm_repeats==null?"미응답":student.alarm_repeats+"회"}</td><td>{student.preferred_temperature}℃</td></tr>)}
+        {isLoading && <tr><td colSpan={18}><div className="empty-table">DB에서 설문을 불러오는 중입니다</div></td></tr>}
       </tbody></table></div>
     </section>
   </main>;

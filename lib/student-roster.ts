@@ -12,7 +12,7 @@ export function createDefaultRoster(classCount: number, studentsPerClass: number
   const students: SurveyRow[] = [];
   for (const grade of [1, 2, 3]) for (let classNo = 1; classNo <= classCount; classNo += 1) for (let seat = 1; seat <= studentsPerClass; seat += 1) {
     const studentId = String(grade) + String(classNo) + String(seat).padStart(2, "0");
-    students.push({ id: "default-" + studentId, student_id: studentId, student_name: "미응답 " + studentId, grade, wake_time: "07:30:00", sleep_time: "00:30:00", shower_time: "07:40:00", shower_frequency: 1, tidiness: 3, noise_sensitivity: 3, preferred_temperature: 22, light_sensitivity: 3, ventilation_preference: 3, alarm_sensitivity: 3, room_activity: 3, is_test: false, is_default: true, created_at: "" });
+    students.push({ id: "default-" + studentId, student_id: studentId, student_name: "미응답 " + studentId, grade, wake_time: "07:30:00", sleep_time: "00:30:00", shower_time: "07:40:00", shower_frequency: 1, tidiness: 3, noise_sensitivity: 3, preferred_temperature: 22, light_sensitivity: 3, ventilation_preference: 3, alarm_sensitivity: 3, room_activity: 3, shower_duration_minutes: null, night_noise_activity: null, night_light_usage: null, alarm_repeats: null, is_test: false, is_default: true, created_at: "" });
   }
   return students;
 }

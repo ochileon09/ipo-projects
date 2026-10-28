@@ -36,7 +36,7 @@ export function StudentBed({ roomId, roomNumber, grade, bedIndex, student }: {
     actions?.drag(null);
     actions?.over(null);
   }
-  const content = <><i>{bedIndex + 1}</i>{student ? <div><b title={student.student_name}>{student.student_name}{actions?.manualStudents.has(student.student_id) && <span className="manual-student-badge">수동</span>}</b><small>{student.student_id} · 씻기 {student.shower_time.slice(0,5)}{student.is_default ? " · 기본값" : student.is_test ? " · 테스트" : " · 실제"}</small></div> : <em>빈 자리</em>}</>;
+  const content = <><i>{bedIndex + 1}</i>{student ? <div><b title={student.student_name}>{student.student_name}{actions?.manualStudents.has(student.student_id) && <span className="manual-student-badge">수동</span>}</b><small>{student.student_id} · 씻기 {student.shower_time.slice(0,5)}{student.shower_duration_minutes!=null?` (${student.shower_duration_minutes}분)`:""}{student.is_default ? " · 기본값" : student.is_test ? " · 테스트" : " · 실제"}</small></div> : <em>빈 자리</em>}</>;
   const base = "compact-bed student-bed" + (student ? " occupied" : "");
   if (!actions) return <div className={base}>{content}</div>;
   return <><button type="button" className={base + (actions.selectedId === student?.student_id || actions.draggingId === student?.student_id ? " is-selected" : "") + (actions.hover === address ? compatible ? " is-drop-target" : " is-invalid-target" : "")}

@@ -13,6 +13,14 @@ function ScoreField({ name, title, low, high }: { name: string; title: string; l
   </fieldset>;
 }
 
+function NightActivityField({ name, title }: { name: string; title: string }) {
+  return <label><span>{title} <b className="required-star">*</b></span><select name={name} defaultValue="" required>
+    <option value="" disabled>빈도를 선택하세요</option><option value="1">전혀 하지 않음</option>
+    <option value="2">일주일에 1일 정도</option><option value="3">일주일에 2~3일</option>
+    <option value="4">일주일에 4일 정도</option><option value="5">거의 매일</option>
+  </select></label>;
+}
+
 export default function StudentApplicationPage() {
   const [connection, setConnection] = useState("연결 확인 중");
   const [notice, setNotice] = useState("");
@@ -51,6 +59,10 @@ export default function StudentApplicationPage() {
       sleep_time: data.get("sleepTime"),
       shower_time: data.get("showerTime"),
       shower_frequency: Number(data.get("showerFrequency")),
+      shower_duration_minutes: Number(data.get("showerDuration")),
+      night_noise_activity: Number(data.get("nightNoiseActivity")),
+      night_light_usage: Number(data.get("nightLightUsage")),
+      alarm_repeats: Number(data.get("alarmRepeats")),
       tidiness: Number(data.get("tidiness")),
       noise_sensitivity: Number(data.get("noise")),
       preferred_temperature: Number(data.get("temperature")),
@@ -90,12 +102,14 @@ export default function StudentApplicationPage() {
         </div>
       </section>
       <section className="form-section">
-        <div className="section-heading"><span>02</span><div><h2>생활 리듬</h2><p>평소 기숙사에서의 시간을 기준으로 입력하세요.</p></div></div>
+        <div className="section-heading"><span>02</span><div><h2>생활 리듬</h2><p>최근 2주 평일의 기숙사 생활을 기준으로 입력하세요.</p></div></div>
         <div className="grid two-columns">
           <label><span>평균 기상 시간 <b className="required-star">*</b></span><input type="time" name="wakeTime" defaultValue="07:30" required /></label>
           <label><span>평균 취침 시간 <b className="required-star">*</b></span><input type="time" name="sleepTime" defaultValue="00:30" required /></label>
           <label><span>주로 씻는 시간 <b className="required-star">*</b></span><input type="time" name="showerTime" defaultValue="07:40" required /><small>하루 중 가장 자주 씻는 시간을 입력하세요.</small></label>
+          <label><span>샤워 1회 소요 시간 <b className="required-star">*</b></span><select name="showerDuration" defaultValue="" required><option value="" disabled>평균 소요 시간을 선택하세요</option>{[5,10,15,20,30,45,60].map(minutes=><option key={minutes} value={minutes}>{minutes}분{minutes===60?" 정도":""}</option>)}</select><small>샤워 공간을 사용하는 시간을 기준으로 입력하세요. 사용 시간이 겹치는지 계산합니다.</small></label>
           <label><span>하루 샤워 횟수 <b className="required-star">*</b></span><select name="showerFrequency" defaultValue="1" required><option value="1">1회</option><option value="2">2회</option><option value="3">3회 이상</option></select></label>
+          <label><span>기상할 때 알람이 울리는 횟수 <b className="required-star">*</b></span><select name="alarmRepeats" defaultValue="" required><option value="" disabled>스누즈를 포함해 선택하세요</option><option value="0">알람을 사용하지 않음</option>{[1,2,3,4,5].map(count=><option key={count} value={count}>{count}회{count===5?" 이상":""}</option>)}</select><small>다시 울림(스누즈)을 포함합니다. 룸메이트가 자는 시간에 울리는 알람을 고려합니다.</small></label>
         </div>
       </section>
       <section className="form-section">
@@ -111,6 +125,13 @@ export default function StudentApplicationPage() {
           <label><span>룸메이트 희망 사항 <b className="optional-mark">(선택)</b></span><input name="roommatePreference" placeholder="함께 지내고 싶은 학생 또는 조건" maxLength={200} /></label>
         </div>
         <label className="wide-label"><span>방 위치 배려가 필요한 신체적 사유 <b className="optional-mark">(선택)</b></span><textarea name="accessibility" rows={3} placeholder="없으면 비워 두어도 됩니다." maxLength={500} /></label>
+      </section>
+      <section className="form-section">
+        <div className="section-heading"><span>04</span><div><h2>룸메이트가 잠든 뒤의 습관</h2><p>최근 2주 평일을 기준으로, 다른 룸메이트가 잠든 뒤의 행동을 선택하세요.</p></div></div>
+        <div className="grid two-columns">
+          <NightActivityField name="nightNoiseActivity" title="통화·대화 등 소리가 나는 활동 빈도" />
+          <NightActivityField name="nightLightUsage" title="스탠드나 조명을 켜 두는 빈도" />
+        </div>
       </section>
       <div className="form-footer"><p>제출한 생활 습관은 룸메이트와 호실 배정에 활용됩니다.</p><button type="submit" disabled={isSaving}>{isSaving ? "제출 중..." : "설문 제출하기"}</button></div>
     </form>

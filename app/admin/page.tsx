@@ -7,8 +7,9 @@ import { DormitoryEditor } from "@/components/dormitory-editor";
 import { FloorGridMap } from "@/components/floor-grid-map";
 import { SurveyDeleteDialog } from "@/components/survey-delete-dialog";
 import { useAdminRealtime } from "@/lib/supabase/use-admin-realtime";
-import { allocateDormitory, createDefaultLayout, validateLayout, type AssignedRoom, type DormLayout, type FloorLayout } from "@/lib/dormitory-layout";
-import { selectRoster, type SurveyRow } from "@/lib/student-roster";
+import { StudentBed, StudentPlacementProvider } from "@/components/student-bed";
+import { allocateDormitory, createDefaultLayout, validateLayout, planManualMove, type AssignedRoom, type BedAddress, type ManualAssignment, type DormLayout, type FloorLayout } from "@/lib/dormitory-layout";
+import { isSchoolStudentId, selectRoster, type SurveyRow } from "@/lib/student-roster";
 
 const scoreDescription = "0~10점 생활 패턴 적합도: 취침·기상·청결·소음·온도·조명·환기·알람·활동의 유사성과 샤워 시간 분산을 가중 합산한 뒤 정규화합니다. 모든 조합 중 수학적 최적임을 보장하는 값은 아닙니다.";
 type SchoolSettings = { classCount: number; studentsPerClass: number; roomCapacity: number };
@@ -19,10 +20,9 @@ function RoomCard({ room }: { room: AssignedRoom<SurveyRow> }) {
   return <section className="school-room-card" aria-label={room.number + "호"}>
     <div className="school-room-header"><div className="room-number-score"><strong>{room.number}</strong><span className={"room-score " + (room.score === null ? "unrated" : room.score >= 8 ? "score-high" : room.score >= 6 ? "score-mid" : "score-low")} title={room.score === null ? "생활 패턴을 비교하려면 2명 이상 필요합니다." : scoreDescription}>{room.score === null ? "평가 대기" : room.score.toFixed(1) + " / 10"}</span></div><span>{room.students.length}/{room.capacity}</span></div>
     <div className="compact-bed-list">{Array.from({ length: room.capacity }, (_, bedIndex) => {
-      const student = room.students[bedIndex];
-      return <div className={student ? "compact-bed occupied" : "compact-bed"} key={bedIndex}><i>{bedIndex + 1}</i>{student ? <div><b title={student.student_name}>{student.student_name}</b><small>{student.student_id} · 씻기 {student.shower_time.slice(0, 5)}{student.is_default ? " · 기본값" : student.is_test ? " · 테스트" : " · 실제"}</small></div> : <em>빈 자리</em>}</div>;
+      return <StudentBed key={bedIndex} roomId={room.id} roomNumber={room.number} grade={room.grade} bedIndex={bedIndex} student={room.beds[bedIndex]} />;
     })}</div>
-    <small className="match-score">{uncertain ? "기본값 포함 · 응답 후 점수 변경" : room.students.length > 1 ? "생활 패턴 기반 임시 배정" : "룸메이트 응답 후 점수 산출"}</small>
+    <small className="match-score">{uncertain ? "기본값 포함 · 응답 후 점수 변경" : room.students.length > 1 ? "생활 패턴 적합도" : "룸메이트 응답 후 점수 산출"}</small>
   </section>;
 }
 
@@ -44,6 +44,14 @@ export default function AdminPage() {
   const [draftSchool, setDraftSchool] = useState(school);
   const [savedLayout, setSavedLayout] = useState<DormLayout | null>(null);
   const [draftLayout, setDraftLayout] = useState<DormLayout | null>(null);
+  const [manualAssignments, setManualAssignments] = useState<ManualAssignment[]>([]);
+  const [placementRevision, setPlacementRevision] = useState(0);
+  const [savingPlacement, setSavingPlacement] = useState(false);
+  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
+  const [draggingStudentId, setDraggingStudentId] = useState<string | null>(null);
+  const [hoverBed, setHoverBed] = useState<string | null>(null);
+  const [placementMessage, setPlacementMessage] = useState("");
+  const [undoPlacement, setUndoPlacement] = useState<{assignments:ManualAssignment[];revision:number}|null>(null);
   const [testEnabled, setTestEnabled] = useState(false);
   const [includeDefaults, setIncludeDefaults] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -61,27 +69,24 @@ export default function AdminPage() {
   const loadDashboard = useCallback(async (schoolKey: string, withSettings = false) => {
     const version = ++requestVersion.current;
     if (withSettings) setIsLoading(true);
-    const [surveyResult, managementResult, settingsResult, deletedResult] = await Promise.all([
-      supabase.rpc("get_student_surveys_for_admin_by_key", { p_admin_key: schoolKey }),
-      supabase.rpc("get_dormitory_management_by_key", { p_admin_key: schoolKey }),
-      supabase.rpc("get_dormitory_settings_by_key", { p_admin_key: schoolKey }),
-      supabase.rpc("get_deleted_student_surveys_by_key", { p_admin_key: schoolKey }),
-    ]);
+    const { data, error } = await supabase.rpc("get_dormitory_dashboard_by_key", { p_admin_key: schoolKey });
     if (version !== requestVersion.current) return;
-    const error = surveyResult.error ?? managementResult.error ?? settingsResult.error ?? deletedResult.error;
     if (error) setErrorMessage("DB 조회 실패: " + error.message);
     else {
       setErrorMessage("");
-      const next = ((surveyResult.data ?? []) as Omit<SurveyRow, "is_default">[]).map(survey => ({ ...survey, is_default: false }));
+      const next = ((data?.surveys ?? []) as Omit<SurveyRow, "is_default">[]).map(survey => ({ ...survey, is_default: false }));
       setSurveys(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next);
-      const nextDeleted = (deletedResult.data ?? []) as DeletedSurvey[];
+      const nextDeleted = (data?.deleted_surveys ?? []) as DeletedSurvey[];
       setDeletedSurveys(previous => JSON.stringify(previous) === JSON.stringify(nextDeleted) ? previous : nextDeleted);
-      const management = managementResult.data?.[0];
+      const management = data?.management;
       if (management) {
         setSavedLayout(previous => JSON.stringify(previous) === JSON.stringify(management.layout) ? previous : management.layout as DormLayout | null);
         setIncludeDefaults(management.include_defaults);
+        const nextManual=(management.manual_assignments??[]) as ManualAssignment[];
+        setManualAssignments(previous=>JSON.stringify(previous)===JSON.stringify(nextManual)?previous:nextManual);
+        setPlacementRevision(Number(management.placement_revision));
       }
-      const settings = settingsResult?.data?.[0];
+      const settings = data?.school;
       if (settings) {
         const nextSchool = { classCount: Number(settings.class_count), studentsPerClass: Number(settings.students_per_class), roomCapacity: Number(settings.room_capacity) };
         setSchool(previous => JSON.stringify(previous) === JSON.stringify(nextSchool) ? previous : nextSchool);
@@ -136,6 +141,7 @@ export default function AdminPage() {
     requestVersion.current += 1;
     setIsAuthenticated(false); setTestEnabled(false); setAdminKey(""); setSurveys([]); setAuthError(""); setSettingsNotice(""); setErrorMessage(""); setDraftLayout(null);
     setDeletedSurveys([]); setDeleteTarget(null); schoolDraftDirty.current = false;
+    setManualAssignments([]);setSelectedStudentId(null);setDraggingStudentId(null);setUndoPlacement(null);setPlacementMessage("");
     previousAssignments.current = new Map(); setMovedCount(0);
   }
 
@@ -179,7 +185,7 @@ export default function AdminPage() {
   const automaticLayout = useMemo(() => createDefaultLayout(studentsPerGrade, school.roomCapacity), [studentsPerGrade, school.roomCapacity]);
   const effectiveLayout = savedLayout ?? automaticLayout;
   const roster = useMemo(() => selectRoster(surveys, school.classCount, school.studentsPerClass, testEnabled, includeDefaults), [surveys, school.classCount, school.studentsPerClass, testEnabled, includeDefaults]);
-  const allocation = useMemo(() => allocateDormitory(roster.activeStudents, effectiveLayout), [roster.activeStudents, effectiveLayout]);
+  const allocation = useMemo(() => allocateDormitory(roster.activeStudents, effectiveLayout, manualAssignments), [roster.activeStudents, effectiveLayout, manualAssignments]);
   const roomsById = useMemo(() => new Map(allocation.rooms.map(room => [room.id, room])), [allocation.rooms]);
   const actualCount = roster.allStudents.filter(student => !student.is_default && !student.is_test).length;
   const testCount = roster.allStudents.filter(student => student.is_test).length;
@@ -193,6 +199,41 @@ export default function AdminPage() {
   const actualAssignments = useMemo(() => new Map(allocation.rooms.flatMap(room => room.students.filter(student => !student.is_default && !student.is_test).map(student => [student.id, { building: effectiveLayout.find(building => room.id.startsWith(building.id + "/"))?.name, room: room.number }] as const))), [allocation.rooms, effectiveLayout]);
   const eligibleResponseIds = new Set(roster.allStudents.filter(student => !student.is_default && !student.is_test).map(student => student.id));
   const rosterReviewCount = roster.receivedStudents.length - actualCount;
+  const manualStudentIds=useMemo(()=>new Set(allocation.validManual.map(pin=>pin.studentId)),[allocation.validManual]);
+  const activePlacementStudent=allocation.rooms.flatMap(room=>room.students).find(student=>student.student_id===(draggingStudentId??selectedStudentId))??null;
+
+  async function saveManualPlacement(next:ManualAssignment[], undo=false) {
+    if(savingPlacement)return;
+    setSavingPlacement(true);setPlacementMessage("");setSelectedStudentId(null);setDraggingStudentId(null);setHoverBed(null);
+    const previous=manualAssignments;
+    const expected=undo?undoPlacement?.revision:placementRevision;
+    const {data,error}=await supabase.rpc("set_dormitory_manual_assignments_by_key",{p_admin_key:adminKey,p_assignments:next,p_expected_revision:expected});
+    if(error) {await loadDashboard(adminKey);setPlacementMessage(error.message);}
+    else {
+      setUndoPlacement(undo?null:{assignments:previous,revision:Number(data)});
+      await loadDashboard(adminKey);
+      setPlacementMessage(undo?"이전 수동 배치로 되돌렸습니다.":next.length?"수동 배치를 저장했습니다.":"수동 배치를 해제하고 자동 배정을 적용했습니다.");
+    }
+    setSavingPlacement(false);
+  }
+
+  function moveStudent(studentId:string,target:BedAddress) {
+    if(savingPlacement)return;
+    try {
+      const retained=manualAssignments.filter(pin=>isSchoolStudentId(pin.studentId,school.classCount,school.studentsPerClass));
+      const next=planManualMove(allocation.rooms,retained,studentId,target);
+      if(JSON.stringify(next)===JSON.stringify(manualAssignments)){setSelectedStudentId(null);return;}
+      void saveManualPlacement(next);
+    }catch(error){setPlacementMessage((error as Error).message);setSelectedStudentId(null);}
+  }
+
+  function selectBed(target:BedAddress) {
+    if(savingPlacement)return;
+    const student=roomsById.get(target.roomId)?.beds[target.bedIndex];
+    if(selectedStudentId){moveStudent(selectedStudentId,target);return;}
+    if(student){setSelectedStudentId(student.student_id);setPlacementMessage(student.student_name+" 선택됨 · 이동할 빈 자리나 교환할 학생을 선택하세요.");}
+    else setPlacementMessage("먼저 옮길 학생을 선택하세요.");
+  }
 
   useEffect(() => {
     const next = new Map<string, string>();
@@ -226,7 +267,7 @@ export default function AdminPage() {
       </form>
     </section>
 
-    <DormitoryEditor value={draftLayout ?? effectiveLayout} onChange={setDraftLayout} onSave={() => void saveLayout(draftLayout ?? effectiveLayout)} onAuto={() => void saveLayout(null)} busy={isSavingLayout} dirty={draftLayout !== null} students={roster.activeStudents} />
+    <DormitoryEditor value={draftLayout ?? effectiveLayout} onChange={setDraftLayout} onSave={() => void saveLayout(draftLayout ?? effectiveLayout)} onAuto={() => void saveLayout(null)} busy={isSavingLayout||savingPlacement} dirty={draftLayout !== null} students={roster.activeStudents} manualAssignments={manualAssignments} />
 
     <section className="test-panel admin-test-panel" aria-labelledby="test-mode-title"><div><p className="eyebrow">OPERATION MODE</p><h2 id="test-mode-title">{testEnabled ? "테스트 모드 사용 중" : "실제 운영 모드"}</h2><p>관리자 페이지를 새로 열면 테스트 모드는 꺼집니다. 테스트 학생 생성 버튼을 누른 경우에만 가상 학생을 배정에 포함합니다.</p>{!testEnabled && storedTestCount > 0 && <p>저장된 가상 학생 {storedTestCount}명은 현재 배정에서 제외되어 있습니다. 제거 버튼으로 DB에서도 정리할 수 있습니다.</p>}<label className="check-label defaults-option"><input type="checkbox" checked={includeDefaults} disabled={isChangingMode} onChange={event => void changeOperation(testEnabled, event.target.checked)} />미응답 학생도 기본값으로 배정 (취침 00:30 · 기상 07:30 · 씻기 07:40)</label></div><div className="test-actions"><button className="secondary-button" onClick={() => void createTestStudents()} disabled={isChangingMode || isLoading}>{isChangingMode ? "변경 중..." : testEnabled ? "테스트 학생 다시 생성" : "테스트 학생 생성"}</button>{(testEnabled || storedTestCount > 0) && <button className="danger-outline" onClick={() => void changeOperation(false, includeDefaults)} disabled={isChangingMode || isLoading}>{testEnabled ? "테스트 종료 · 가상 학생 제거" : "저장된 가상 학생 제거"}</button>}</div></section>
 
@@ -238,7 +279,7 @@ export default function AdminPage() {
         {!isLoading && roster.receivedStudents.map(student => {
           const outside = roster.outsideRoster.some(response => response.id === student.id);
           const assignment = actualAssignments.get(student.id);
-          const status = outside ? "학교 명단 범위 밖" : !eligibleResponseIds.has(student.id) ? "같은 학번의 다른 이름 확인 필요" : assignment ? `${assignment.building} ${assignment.room}호 · 임시 배정` : "자리 부족 · 배정 대기";
+          const status = outside ? "학교 명단 범위 밖" : !eligibleResponseIds.has(student.id) ? "같은 학번의 다른 이름 확인 필요" : assignment ? `${assignment.building} ${assignment.room}호 · ${manualStudentIds.has(student.student_id)?"수동 배정":"임시 배정"}` : "자리 부족 · 배정 대기";
           return <tr key={student.id}><td>{student.student_id}</td><td><strong>{student.student_name}</strong></td><td><span className={assignment ? "live-badge" : "default-badge"}>{status}</span>{outside && <small className="roster-row-reason">{Number(student.student_id[1])}반 {Number(student.student_id.slice(2))}번 · 설정: {school.classCount}개 반, 반당 {school.studentsPerClass}명</small>}</td><td>{student.wake_time.slice(0, 5)}</td><td>{student.sleep_time.slice(0, 5)}</td><td>{student.shower_time.slice(0, 5)}</td><td>{new Date(student.created_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", hour12: false })}</td><td><button type="button" className="survey-row-delete" aria-label={`${student.student_id} ${student.student_name} 설문 삭제`} disabled={!!changingSurveyId} onClick={() => { setErrorMessage(""); setDeleteTarget(student); }}>삭제</button></td></tr>;
         })}
         {(isLoading || roster.receivedStudents.length === 0) && <tr><td colSpan={8}><div className="empty-table">{isLoading ? "실제 설문을 불러오는 중입니다" : "아직 접수된 실제 설문이 없습니다"}</div></td></tr>}
@@ -248,7 +289,11 @@ export default function AdminPage() {
     <details className="deleted-survey-history"><summary>삭제된 설문 <span>{deletedSurveys.length}건</span></summary><p>실수로 삭제한 응답을 복구할 수 있습니다. 같은 학번·이름으로 새 설문이 접수된 경우에는 최신 응답을 우선합니다.</p><div className="table-wrap"><table className="survey-table"><thead><tr><th>학번</th><th>이름</th><th>삭제 시각</th><th>관리</th></tr></thead><tbody>{deletedSurveys.map(student => <tr key={student.id}><td>{student.student_id}</td><td>{student.student_name}</td><td>{new Date(student.deleted_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", hour12: false })}</td><td><button type="button" className="secondary-button survey-row-restore" aria-label={`${student.student_id} ${student.student_name} 설문 복구`} disabled={!!changingSurveyId} onClick={() => void changeSurvey(student.id, true)}>{changingSurveyId === student.id ? "복구 중..." : "복구"}</button></td></tr>)}{deletedSurveys.length === 0 && <tr><td colSpan={4}><div className="empty-table">삭제된 설문이 없습니다</div></td></tr>}</tbody></table></div></details>
     {deleteTarget && <SurveyDeleteDialog student={deleteTarget} busy={changingSurveyId === deleteTarget.id} error={errorMessage} onCancel={() => setDeleteTarget(null)} onDelete={() => void changeSurvey(deleteTarget.id, false)} />}
 
-    <section className="dorm-map school-dorm-map" aria-labelledby="map-title"><div className="map-heading"><div><p className="eyebrow">LIVE ROOM PROPOSAL</p><h2 id="map-title">학년별 건물·층·구역 지도</h2><p>호수 옆 숫자는 10점 만점의 생활 패턴 적합도입니다. 2명 미만은 평가 대기로 표시합니다.</p></div><div className="grade-legend"><span><i className="grade1-dot" />1학년</span><span><i className="grade2-dot" />2학년</span><span><i className="grade3-dot" />3학년</span></div></div>
+    <StudentPlacementProvider value={{activeStudent:activePlacementStudent,selectedId:selectedStudentId,draggingId:draggingStudentId,hover:hoverBed,busy:savingPlacement,manualStudents:manualStudentIds,select:selectBed,drop:moveStudent,drag:setDraggingStudentId,over:setHoverBed}}>
+    <section className="dorm-map school-dorm-map" aria-labelledby="map-title"><div className="map-heading"><div><p className="eyebrow">LIVE ROOM PROPOSAL</p><h2 id="map-title">학년별 건물·층·구역 지도</h2><p>학생을 빈 침대로 드래그하면 이동하고, 다른 학생에게 놓으면 두 학생의 자리를 교환합니다.</p></div><div className="grade-legend"><span><i className="grade1-dot" />1학년</span><span><i className="grade2-dot" />2학년</span><span><i className="grade3-dot" />3학년</span></div></div>
+      <div className="manual-placement-tools"><span>수동 배치 <b>{allocation.validManual.length}명</b></span><button type="button" className="secondary-button" disabled={savingPlacement||!undoPlacement||undoPlacement.revision!==placementRevision} title="저장 후 다른 변경이 반영되기 전까지 실행 취소할 수 있습니다." onClick={()=>undoPlacement&&void saveManualPlacement(undoPlacement.assignments,true)}>배치 실행 취소</button><button type="button" className="secondary-button" disabled={savingPlacement||manualAssignments.length===0} onClick={()=>void saveManualPlacement([])}>수동 배치 해제 · 자동 배정</button>{selectedStudentId&&<button type="button" className="secondary-button" onClick={()=>{setSelectedStudentId(null);setPlacementMessage("");}}>선택 취소</button>}<small>클릭으로 학생 → 목적지를 선택해도 됩니다. 같은 학년 안에서만 이동하며 자동 저장됩니다.</small></div>
+      <p className="manual-placement-status" role="status">{savingPlacement?"배치를 저장하는 중입니다...":placementMessage||"수동 배치한 학생의 자리는 새 설문이 들어와도 유지됩니다. 나머지 학생은 자동 배정됩니다."}</p>
+      {allocation.invalidManual.length>0&&<p className="manual-placement-status">구조·학년·정원이 변경되어 적용할 수 없는 수동 배치 {allocation.invalidManual.length}건은 자동 배정을 적용했습니다.</p>}
       <details className="score-explanation"><summary>적합도 점수는 어떻게 계산하나요?</summary><p>{scoreDescription} 각 방의 학생 쌍별 점수를 평균내며 빈 침대 수는 점수에 반영하지 않습니다. 기본값이 포함된 방은 설문 응답 후 점수가 달라집니다.</p></details>
       {effectiveLayout.map(building => <div className="building-block" key={building.id}><div className="building-heading"><div><strong>{building.name}</strong>{building.provisional && <span>임시 지도</span>}</div><p>{savedLayout ? "관리자가 저장한 구조" : "명단·기본 인실에 맞춘 자동 구조"}</p></div>
         {[...building.floors].sort((a, b) => b.floor - a.floor).map(floor => {
@@ -263,6 +308,7 @@ export default function AdminPage() {
         })}
       </div>)}
     </section>
+    </StudentPlacementProvider>
 
     <section className="admin-board"><div className="board-heading"><div><h2>학생별 생활 패턴</h2><p>미응답 학생은 기본값을 표시합니다. 기본값 배정 옵션을 끄면 응답 도착 전까지 방을 차지하지 않습니다.</p></div><span>{schoolRosterSize}명</span></div>
       <div className="table-wrap"><table className="survey-table expanded-table"><thead><tr><th>구분</th><th>학번</th><th>이름</th><th>학년</th><th>기상</th><th>취침</th><th>주로 씻기</th><th>횟수</th><th>청결</th><th>소음</th><th>조명</th><th>환기</th><th>알람</th><th>활동</th><th>온도</th></tr></thead><tbody>

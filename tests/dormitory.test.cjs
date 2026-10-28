@@ -5,6 +5,7 @@ const { createDefaultLayout, allocateDormitory, newFloor, validateLayout } = req
 const { selectRoster, createDefaultRoster } = require('../.codex_tmp/matching-tests/student-roster.js');
 const { createFloorGrid, expandSelection, paintGrid, mergeGrid, splitGrid, moveGridSpace, validateFloorGrid } = require('../.codex_tmp/matching-tests/floor-grid.js');
 const { floorRooms, gridFromLegacyFloor } = require('../.codex_tmp/matching-tests/dormitory-layout.js');
+const { planManualMove } = require('../.codex_tmp/matching-tests/dormitory-layout.js');
 
 function student(studentId, overrides = {}) {
   return { ...createDefaultRoster(6, 16).find(row => row.student_id === studentId), id: studentId, is_default: false, student_name: '학생' + studentId, created_at: '2026-10-01T00:00:00Z', ...overrides };
@@ -180,4 +181,56 @@ test('converting a legacy map or moving only its room tiles leaves student assig
   assert.deepEqual(converted,initial);
   const moved=moveGridSpace(grid,'left/0',3,0);
   assert.deepEqual(allocateDormitory(students,makeLayout({...floor,grid:moved})),initial);
+});
+
+function manualLayout() {return [{id:'a',name:'A',diningSide:'none',floors:[{...newFloor(2,2,2),leftRooms:3,rightRooms:1,rightGrade:3}]}];}
+function location(result,id) {for(const room of result.rooms){const bedIndex=room.beds.findIndex(s=>s?.student_id===id);if(bedIndex>=0)return {roomId:room.id,bedIndex};}return null;}
+test('manual move to an empty bed retains the chosen bed index, vacant source and other students',()=>{
+  const people=[student('2101'),student('2102')];const layout=manualLayout();
+  const before=allocateDormitory(people,layout);const source=location(before,'2101');
+  const target={roomId:'a/floor-2/left/2',bedIndex:1};
+  const pins=planManualMove(before.rooms,[],'2101',target);const after=allocateDormitory(people,layout,pins);
+  assert.deepEqual(location(after,'2101'),target);
+  assert.equal(after.rooms.find(r=>r.id===source.roomId).beds[source.bedIndex],null);
+  assert.deepEqual(location(after,'2102'),location(before,'2102'));
+  assert.deepEqual(location(allocateDormitory([...people,student('2103')],layout,pins),'2101'),target);
+});
+test('dropping onto an occupied bed swaps precisely both student positions, including within one room',()=>{
+  const people=[student('2101'),student('2102'),student('2103')];const layout=manualLayout();
+  let before=allocateDormitory(people,layout);let pins=[];
+  for(const second of ['2102','2103']){
+    const from=location(before,'2101');const target=location(before,second);
+    pins=planManualMove(before.rooms,pins,'2101',target);const after=allocateDormitory(people,layout,pins);
+    assert.deepEqual(location(after,'2101'),target);assert.deepEqual(location(after,second),from);
+    assert(after.rooms.every(r=>r.score===roomCompatibilityScore(r.students)));
+    before=after;
+  }
+});
+test('manual placement rejects different grades, invalid beds and missing students; no-op retains pins',()=>{
+  const result=allocateDormitory([student('2101'),student('3101')],manualLayout());
+  assert.throws(()=>planManualMove(result.rooms,[],'2101',{roomId:'a/floor-2/right/0',bedIndex:0}),/학년/);
+  assert.throws(()=>planManualMove(result.rooms,[],'2101',{roomId:'a/floor-2/left/0',bedIndex:2}),/자리/);
+  assert.throws(()=>planManualMove(result.rooms,[],'2109',{roomId:'a/floor-2/left/0',bedIndex:0}),/학생/);
+  const pins=[];assert.equal(planManualMove(result.rooms,pins,'2101',location(result,'2101')),pins);
+});
+test('manual test students never displace real responses when capacity fills; stale pins fall back safely',()=>{
+  const layout=[{...manualLayout()[0],floors:[{...newFloor(2,2,2),leftRooms:1,rightRooms:0}]}];
+  const pins=[{studentId:'2103',roomId:'a/floor-2/left/0',bedIndex:0}];
+  const result=allocateDormitory([student('2101'),student('2102'),student('2103',{is_test:true})],layout,pins);
+  assert.equal(result.rooms[0].students.length,2);assert(result.rooms[0].students.every(s=>!s.is_test));
+  assert.equal(result.inactiveManual.length,1);
+  const stale=allocateDormitory([student('2101')],layout,[{studentId:'2101',roomId:'removed-room',bedIndex:0}]);
+  assert.equal(stale.invalidManual.length,1);assert(location(stale,'2101'));
+});
+test('repeated manual moves and swaps maintain unique occupancy, room capacities and pinned targets',()=>{
+  const people=['2101','2102','2103','2104','2105','3101'].map(id=>student(id));const layout=manualLayout();
+  let pins=[];let result=allocateDormitory(people,layout);
+  for(let i=0;i<36;i++){
+    const id=people[i%5].student_id;const target={roomId:`a/floor-2/left/${Math.floor(i/2)%3}`,bedIndex:i%2};
+    pins=planManualMove(result.rooms,pins,id,target);result=allocateDormitory(people,layout,pins);
+    assert.deepEqual(location(result,id),target);
+    const ids=result.rooms.flatMap(r=>r.students.map(s=>s.student_id));
+    assert.equal(ids.length,people.length);assert.equal(new Set(ids).size,people.length);
+    assert(result.rooms.every(r=>r.students.length<=r.capacity&&r.beds.length===r.capacity&&r.students.every(s=>s.grade===r.grade)));
+  }
 });

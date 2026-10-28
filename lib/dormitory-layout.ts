@@ -13,7 +13,9 @@ export type FloorLayout = {
 };
 export type BuildingLayout = { id: string; name: string; diningSide: "left" | "right" | "none"; provisional: boolean; floors: FloorLayout[] };
 export type DormLayout = BuildingLayout[];
-export type AssignedRoom<T> = { id: string; number: string; grade: Grade; capacity: number; students: T[]; score: number | null };
+export type AssignedRoom<T> = { id: string; number: string; grade: Grade; capacity: number; students: T[]; beds: (T | null)[]; score: number | null };
+export type ManualAssignment = { studentId: string; roomId: string; bedIndex: number };
+export type BedAddress = { roomId: string; bedIndex: number };
 
 export function floorRooms(floor: FloorLayout) {
   if (floor.grid) return floor.grid.spaces.filter(space => space.kind === "room").map(space => ({ id:space.id, number:space.number!,grade:space.grade!,capacity:space.capacity! })).sort((a,b)=>a.number.localeCompare(b.number,"ko",{numeric:true})||a.id.localeCompare(b.id));
@@ -92,19 +94,70 @@ export function validateLayout(layout: DormLayout): string | null {
   return rooms > 1000 ? "전체 방 수는 1,000개 이하여야 합니다." : null;
 }
 
-export function allocateDormitory<T extends MatchingStudent>(students: T[], layout: DormLayout) {
+export function allocateDormitory<T extends MatchingStudent>(students: T[], layout: DormLayout, manual: ManualAssignment[] = []) {
   const slots: AssignedRoom<T>[] = [];
   for (const building of layout) for (const floor of [...building.floors].sort((a, b) => a.floor - b.floor)) {
     for (const room of floorRooms(floor)) {
-      slots.push({ ...room, id:`${building.id}/${floor.id}/${room.id}`, students: [], score: null });
+      slots.push({ ...room, id:`${building.id}/${floor.id}/${room.id}`, students: [], beds: Array(room.capacity).fill(null), score: null });
     }
   }
   const waiting: T[] = [];
   for (const grade of [1, 2, 3]) {
     const gradeSlots = slots.filter(room => room.grade === grade);
     const result = optimizeRoomAssignments(students.filter(student => student.grade === grade), gradeSlots.map(room => room.capacity));
-    gradeSlots.forEach((slot, index) => { slot.students = result.rooms[index]; slot.score = roomCompatibilityScore(slot.students); });
+    gradeSlots.forEach((slot, index) => { slot.students = result.rooms[index]; slot.beds = Array.from({length:slot.capacity},(_,bed)=>slot.students[bed]??null); });
     waiting.push(...result.waiting);
   }
-  return { rooms: slots, waiting: waiting.sort((a, b) => assignmentPriority(a) - assignmentPriority(b) || a.student_id.localeCompare(b.student_id)) };
+  const roomsById=new Map(slots.map(room=>[room.id,room]));
+  const admitted=new Map(slots.flatMap(room=>room.students.map(student=>[student.student_id,student] as const)));
+  const validManual: ManualAssignment[]=[];
+  const inactiveManual: ManualAssignment[]=[];
+  const invalidManual: ManualAssignment[]=[];
+  const usedStudents=new Set<string>(); const usedBeds=new Set<string>();
+  const pinPriority=(id:string)=>{const student=admitted.get(id);return student?assignmentPriority(student):3;};
+  const orderedManual=[...manual].sort((a,b)=>pinPriority(a.studentId)-pinPriority(b.studentId)||a.studentId.localeCompare(b.studentId));
+  for(const pin of orderedManual) {
+    const room=roomsById.get(pin.roomId);const key=JSON.stringify([pin.roomId,pin.bedIndex]);
+    if(!room||!Number.isInteger(pin.bedIndex)||pin.bedIndex<0||pin.bedIndex>=room.capacity||Number(pin.studentId[0])!==room.grade||(admitted.has(pin.studentId)&&admitted.get(pin.studentId)!.grade!==room.grade)||usedStudents.has(pin.studentId)||usedBeds.has(key)) {invalidManual.push(pin);continue;}
+    if(!admitted.has(pin.studentId)) {inactiveManual.push(pin);continue;}
+    usedStudents.add(pin.studentId);usedBeds.add(key);validManual.push(pin);
+  }
+  slots.forEach(room=>{room.beds=room.beds.map(student=>student&&usedStudents.has(student.student_id)?null:student);});
+  const displaced:T[]=[];
+  for(const pin of validManual) {
+    const room=roomsById.get(pin.roomId)!;
+    if(room.beds[pin.bedIndex])displaced.push(room.beds[pin.bedIndex]!);
+    room.beds[pin.bedIndex]=admitted.get(pin.studentId)!;
+  }
+  for(const student of displaced.sort((a,b)=>assignmentPriority(a)-assignmentPriority(b)||a.student_id.localeCompare(b.student_id))) {
+    let best: {room:AssignedRoom<T>;bed:number;score:number}|null=null;
+    for(const room of slots.filter(room=>room.grade===student.grade)) for(let bed=0;bed<room.capacity;bed++) if(!room.beds[bed]) {
+      const members=room.beds.filter((member):member is T=>member!==null);
+      const score=members.length?roomCompatibilityScore([...members,student])!:0;
+      if(!best||score>best.score)best={room,bed,score};
+    }
+    if(best)best.room.beds[best.bed]=student;
+  }
+  slots.forEach(room=>{room.students=room.beds.filter((student):student is T=>student!==null);room.score=roomCompatibilityScore(room.students);});
+  return { rooms: slots, waiting: waiting.sort((a, b) => assignmentPriority(a) - assignmentPriority(b) || a.student_id.localeCompare(b.student_id)), validManual, inactiveManual, invalidManual };
+}
+
+export function planManualMove<T extends MatchingStudent>(rooms:AssignedRoom<T>[], manual:ManualAssignment[], studentId:string, target:BedAddress) {
+  const sourceRoom=rooms.find(room=>room.beds.some(student=>student?.student_id===studentId));
+  const destination=rooms.find(room=>room.id===target.roomId);
+  if(!sourceRoom||!destination||!Number.isInteger(target.bedIndex)||target.bedIndex<0||target.bedIndex>=destination.capacity)throw new Error("현재 지도에서 학생과 이동할 자리를 다시 확인해 주세요.");
+  const sourceBed=sourceRoom.beds.findIndex(student=>student?.student_id===studentId);
+  const student=sourceRoom.beds[sourceBed]!;
+  if(student.grade!==destination.grade)throw new Error("다른 학년의 호실로는 옮길 수 없습니다.");
+  if(sourceRoom.id===target.roomId&&sourceBed===target.bedIndex)return manual;
+  const other=destination.beds[target.bedIndex];
+  const addresses=[target,...(other?[{roomId:sourceRoom.id,bedIndex:sourceBed}]:[])];
+  const physical=new Map(rooms.map(room=>[room.id,room]));
+  const next=manual.filter(pin=>{
+    const room=physical.get(pin.roomId);
+    return room&&pin.bedIndex>=0&&pin.bedIndex<room.capacity&&Number(pin.studentId[0])===room.grade&&pin.studentId!==studentId&&pin.studentId!==other?.student_id&&!addresses.some(address=>address.roomId===pin.roomId&&address.bedIndex===pin.bedIndex);
+  });
+  next.push({studentId,roomId:target.roomId,bedIndex:target.bedIndex});
+  if(other)next.push({studentId:other.student_id,roomId:sourceRoom.id,bedIndex:sourceBed});
+  return next;
 }

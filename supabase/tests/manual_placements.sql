@@ -1,0 +1,43 @@
+-- All verification changes roll back, including roster/layout changes.
+begin;
+do $$
+declare d jsonb; r bigint; next_r bigint; p jsonb; rejected boolean; count_rooms integer;
+begin
+  perform public.save_dormitory_layout_by_key('12345',null);
+  perform public.set_dormitory_settings_by_key('12345',2,6,16);
+  d:=public.get_dormitory_dashboard_by_key('12345');
+  if not (d?'surveys' and d?'deleted_surveys' and d?'school' and d?'management') then raise exception 'Incomplete dashboard snapshot'; end if;
+  count_rooms:=(select count(*) from public.roomfit_assignable_rooms());
+  if count_rooms<>144 then raise exception 'Default room count mismatch'; end if;
+  if not exists(select 1 from public.roomfit_assignable_rooms() where room_id='a/floor-3/right/0' and grade=2 and capacity=2) then raise exception 'Default grade zoning mismatch'; end if;
+  r:=(d->'management'->>'placement_revision')::bigint;
+  p:='[{"studentId":"2101","roomId":"a/floor-3/right/0","bedIndex":1}]';
+  next_r:=public.set_dormitory_manual_assignments_by_key('12345',p,r);
+  if next_r<=r or (public.get_dormitory_dashboard_by_key('12345')->'management'->'manual_assignments')<>p then raise exception 'Manual placement not persisted'; end if;
+  rejected:=false;begin perform public.set_dormitory_manual_assignments_by_key('12345','[]',r);exception when sqlstate '40001' then rejected:=true;end;
+  if not rejected then raise exception 'Concurrent stale overwrite accepted';end if;
+  r:=next_r;
+  rejected:=false;begin perform public.set_dormitory_manual_assignments_by_key('invalid-key',p,r);exception when sqlstate '28000' then rejected:=true;end;
+  if not rejected then raise exception 'Invalid key accepted';end if;
+  rejected:=false;begin perform public.set_dormitory_manual_assignments_by_key('12345','[{"studentId":"2101","roomId":"b/floor-2/left/0","bedIndex":0}]',r);exception when sqlstate '22023' then rejected:=true;end;
+  if not rejected then raise exception 'Mixed grades accepted';end if;
+  rejected:=false;begin perform public.set_dormitory_manual_assignments_by_key('12345','[{"studentId":"2101","roomId":"a/floor-3/right/0","bedIndex":2}]',r);exception when sqlstate '22023' then rejected:=true;end;
+  if not rejected then raise exception 'Exceeded bed capacity';end if;
+  rejected:=false;begin perform public.set_dormitory_manual_assignments_by_key('12345',p||p,r);exception when sqlstate '22023' then rejected:=true;end;
+  if not rejected then raise exception 'Duplicate student accepted';end if;
+  rejected:=false;begin perform public.set_dormitory_manual_assignments_by_key('12345',p||'[{"studentId":"2102","roomId":"a/floor-3/right/0","bedIndex":1}]',r);exception when sqlstate '22023' then rejected:=true;end;
+  if not rejected then raise exception 'Duplicate bed accepted';end if;
+  rejected:=false;begin perform public.set_dormitory_manual_assignments_by_key('12345','[{"studentId":"2518","roomId":"a/floor-3/right/0","bedIndex":0}]',r);exception when sqlstate '22023' then rejected:=true;end;
+  if not rejected then raise exception 'Student outside configured roster accepted';end if;
+  update public.student_surveys set updated_at=updated_at where false;
+  rejected:=false;begin perform public.set_dormitory_manual_assignments_by_key('12345',p,r);exception when sqlstate '40001' then rejected:=true;end;
+  if not rejected then raise exception 'Survey revision did not invalidate stale placement';end if;
+  perform public.save_dormitory_layout_by_key('12345','[{"id":"grid","name":"검증용","diningSide":"none","floors":[{"id":"f","floor":2,"grid":{"rows":1,"cols":2,"spaces":[{"id":"room","kind":"room","number":"201","grade":2,"capacity":3,"row":0,"col":0,"rowSpan":1,"colSpan":1},{"id":"hall","kind":"corridor","row":0,"col":1,"rowSpan":1,"colSpan":1}]}}]}]');
+  if (select count(*) from public.roomfit_assignable_rooms())<>1 then raise exception 'Grid facilities became assignable rooms';end if;
+  r:=(public.get_dormitory_dashboard_by_key('12345')->'management'->>'placement_revision')::bigint;
+  perform public.set_dormitory_manual_assignments_by_key('12345','[{"studentId":"2101","roomId":"grid/f/room","bedIndex":2}]',r);
+  if has_function_privilege('anon','public.roomfit_assignable_rooms()','execute') then raise exception 'Private room helper exposed';end if;
+end;
+$$;
+select 'PASS: atomic dashboard, manual positions, grade/capacity/duplicate guards, optimistic concurrency, response revisions, grid rooms, authentication; rolled back' as verification;
+rollback;

@@ -518,6 +518,25 @@ tbody tr:hover { background: var(--shell-panel-soft); }
 .grid-room-occupants > div { display:flex; flex-direction:column; gap:3px; padding:7px; background:var(--shell-panel); border-radius:5px; }
 .grid-room-occupants b { font-size:11px; overflow-wrap:anywhere; }
 .grid-room-occupants small, .grid-room-occupants em { color:var(--shell-muted); font-size:9px; font-style:normal; }
+.student-bed { width:100%; min-width:0; border:1px solid transparent; text-align:left; color:var(--shell-text); font-weight:400; border-radius:7px; }
+button.student-bed { background:var(--shell-panel-soft); cursor:pointer; }
+button.student-bed.occupied { cursor:grab; touch-action:none; user-select:none; }
+button.student-bed.occupied:active { cursor:grabbing; }
+button.student-bed:hover { background:var(--shell-accent-soft); border-color:var(--shell-border); }
+button.student-bed.is-selected, button.student-bed.is-drop-target { background:var(--shell-accent-soft); border-color:var(--shell-accent); outline:2px solid var(--shell-accent); outline-offset:-2px; }
+button.student-bed.is-invalid-target { border-color:var(--error-text); background:var(--error-bg); cursor:not-allowed; }
+.manual-student-badge { display:inline-block; margin-left:5px; padding:1px 4px; border-radius:4px; background:var(--shell-accent-soft); color:var(--shell-accent); font-size:8px; font-weight:600; vertical-align:middle; }
+.manual-placement-tools { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-block:12px; }
+.manual-placement-tools > span { margin-right:auto; font-size:12px; color:var(--shell-muted); }
+.manual-placement-tools b { color:var(--shell-text); }
+.manual-placement-tools button { min-height:34px; padding:6px 11px; font-size:11px; }
+.manual-placement-tools small { flex-basis:100%; font-size:11px; color:var(--shell-muted); }
+.manual-placement-status { margin-block:10px 18px; font-size:12px; color:var(--shell-muted); }
+.student-drag-ghost { position:fixed; z-index:100; pointer-events:none; padding:9px 13px; border:1px solid var(--shell-accent); border-radius:8px; background:var(--shell-panel); color:var(--shell-text); box-shadow:0 6px 22px #0003; font-size:12px; }
+.grid-room-occupants .student-bed { display:grid; grid-template-columns:19px minmax(0,1fr); gap:6px; padding:7px; }
+.grid-room-occupants .student-bed > div { min-width:0; display:flex; flex-direction:column; gap:3px; }
+.grid-room-occupants .student-bed i { width:18px; height:23px; font-size:9px; }
+.grid-room-occupants .student-bed b { white-space:normal; }
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
 .admin-sync-meta { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-top:12px; color:var(--shell-muted); font-size:11px; }
 .admin-sync-meta > small { font-size:10px; }

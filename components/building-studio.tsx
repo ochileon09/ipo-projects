@@ -1,14 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { allocateDormitory, type DormLayout, type FloorLayout, type Grade, newFloor, validateLayout } from "@/lib/dormitory-layout";
+import { allocateDormitory, type DormLayout, type FloorLayout, type Grade, type ManualAssignment, newFloor, validateLayout } from "@/lib/dormitory-layout";
 import type { SurveyRow } from "@/lib/student-roster";
 import { FloorGridEditor } from "./floor-grid-editor";
 import { FloorGridMap } from "./floor-grid-map";
 
-export function BuildingStudio({ value, onChange, onSave, onAuto, busy, dirty, students }: {
+export function BuildingStudio({ value, onChange, onSave, onAuto, busy, dirty, students, manualAssignments=[] }: {
   value:DormLayout;onChange:(layout:DormLayout)=>void;onSave:()=>void;onAuto:()=>void;
-  busy:boolean;dirty:boolean;students:SurveyRow[];
+  busy:boolean;dirty:boolean;students:SurveyRow[];manualAssignments?:ManualAssignment[];
 }) {
   const [buildingId,setBuildingId]=useState(value[0].id);
   const building=value.find(b=>b.id===buildingId)??value[0];const bi=value.indexOf(building);
@@ -18,7 +18,7 @@ export function BuildingStudio({ value, onChange, onSave, onAuto, busy, dirty, s
   function updateBuilding(patch:Partial<DormLayout[number]>) {onChange(value.map((b,i)=>i===bi?{...b,...patch}:b));}
   function updateFloor(patch:Partial<FloorLayout>) {updateBuilding({floors:building.floors.map((f,i)=>i===fi?{...f,...patch}:f)});}
   const issue=validateLayout(value);
-  const allocation=useMemo(()=>issue?null:allocateDormitory(students,value),[issue,students,value]);
+  const allocation=useMemo(()=>issue?null:allocateDormitory(students,value,manualAssignments),[issue,students,value,manualAssignments]);
   const beds=[1,2,3].map(grade=>allocation?.rooms.filter(r=>r.grade===grade).reduce((sum,r)=>sum+r.capacity,0)??0);
   return <details className="layout-editor">
     <summary><div><span className="eyebrow">BUILDING STUDIO</span><h2>건물 구조 직접 관리</h2><p>격자를 만들고 마우스로 공간을 선택해 우리 학교 지도를 그려보세요.</p></div><span className="editor-expand">펼치기 / 접기</span></summary>

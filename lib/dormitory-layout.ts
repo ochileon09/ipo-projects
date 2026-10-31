@@ -1,4 +1,4 @@
-import { assignmentPriority, optimizeRoomAssignments, roomCompatibilityScore, type MatchingStudent } from "./roommate-matching";
+import { assignmentPriority, optimizeRoomAssignments, roomCompatibilityScore, canShareRoom, type MatchingStudent } from "./roommate-matching";
 import { validateFloorGrid, type FloorGrid, type GridSpace } from "./floor-grid";
 
 export type Grade = 1 | 2 | 3;
@@ -138,8 +138,15 @@ export function allocateDormitory<T extends MatchingStudent>(students: T[], layo
     }
     if(best)best.room.beds[best.bed]=student;
   }
+  // An approved separation takes precedence over old manual pins. Relocate conflicts, or wait visibly.
+  const conflicts:T[]=[];
+  slots.forEach(room=>{const kept:T[]=[];room.beds=room.beds.map(student=>{if(!student)return null;if(kept.some(member=>!canShareRoom(member,student))){conflicts.push(student);return null;}kept.push(student);return student;});});
+  for(const student of conflicts) {
+    const room=slots.find(room=>room.grade===student.grade&&room.beds.includes(null)&&room.beds.every(member=>!member||canShareRoom(member,student)));
+    if(room)room.beds[room.beds.indexOf(null)]=student;else waiting.push(student);
+  }
   slots.forEach(room=>{room.students=room.beds.filter((student):student is T=>student!==null);room.score=roomCompatibilityScore(room.students);});
-  return { rooms: slots, waiting: waiting.sort((a, b) => assignmentPriority(a) - assignmentPriority(b) || a.student_id.localeCompare(b.student_id)), validManual, inactiveManual, invalidManual };
+  return { rooms: slots, waiting: waiting.sort((a, b) => assignmentPriority(a) - assignmentPriority(b) || a.student_id.localeCompare(b.student_id)), validManual: validManual.filter(pin=>slots.find(room=>room.id===pin.roomId)?.beds[pin.bedIndex]?.student_id===pin.studentId), inactiveManual, invalidManual };
 }
 
 export function planManualMove<T extends MatchingStudent>(rooms:AssignedRoom<T>[], manual:ManualAssignment[], studentId:string, target:BedAddress) {
@@ -151,6 +158,7 @@ export function planManualMove<T extends MatchingStudent>(rooms:AssignedRoom<T>[
   if(student.grade!==destination.grade)throw new Error("다른 학년의 호실로는 옮길 수 없습니다.");
   if(sourceRoom.id===target.roomId&&sourceBed===target.bedIndex)return manual;
   const other=destination.beds[target.bedIndex];
+  if(destination.beds.some((member,index)=>member&&index!==target.bedIndex&&member.student_id!==studentId&&!canShareRoom(member,student)) || (other&&sourceRoom.beds.some((member,index)=>member&&index!==sourceBed&&member.student_id!==other.student_id&&!canShareRoom(member,other))))throw new Error("관리자가 승인한 분리 배정 요청과 충돌합니다.");
   const addresses=[target,...(other?[{roomId:sourceRoom.id,bedIndex:sourceBed}]:[])];
   const physical=new Map(rooms.map(room=>[room.id,room]));
   const next=manual.filter(pin=>{

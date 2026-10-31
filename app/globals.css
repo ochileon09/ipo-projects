@@ -604,3 +604,12 @@ button.student-bed.is-invalid-target { border-color:var(--error-text); backgroun
   .room-number-score { align-items: flex-start; flex-direction: column; gap: 3px; }
   .school-room-header .room-score { padding: 2px 4px; font-size: 9px; }
 }
+
+.avoidance-help {margin:16px 20px;color:var(--shell-muted);font-size:12px;}
+.form-section .avoidance-help {margin:0 0 18px;}
+.avoidance-entry,.separation-review-row {padding:18px;margin-bottom:14px;border:1px solid var(--shell-border);border-radius:10px;}
+.avoidance-entry textarea {margin-bottom:12px;}
+.separation-review-row {margin:12px 20px;}
+.separation-review-row p {white-space:pre-wrap;overflow-wrap:anywhere;}
+.separation-review-row > div {display:flex;gap:12px;align-items:center;flex-wrap:wrap;}
+.separation-review-row button[aria-pressed="true"] {outline:2px solid var(--shell-accent);outline-offset:2px;}

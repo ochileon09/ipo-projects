@@ -10,11 +10,11 @@ import { useAdminRealtime } from "@/lib/supabase/use-admin-realtime";
 import { StudentBed, StudentPlacementProvider } from "@/components/student-bed";
 import { validateLayout, planManualMove, type AssignedRoom, type BedAddress, type ManualAssignment, type DormLayout, type FloorLayout } from "@/lib/dormitory-layout";
 import { isSchoolStudentId, type SurveyRow } from "@/lib/student-roster";
-import { buildDormitoryView, type SchoolSettings } from "@/lib/dormitory-view";
+import { buildDormitoryView, type SchoolSettings, type SeparationRequest } from "@/lib/dormitory-view";
 import { hasDetailedHabits } from "@/lib/roommate-matching";
 import { useAdminSession } from "@/components/admin-session";
 
-const scoreDescription = "0~10점 생활 패턴 적합도: 취침·기상·청결·온도·환기, 샤워 사용 구간의 겹침, 야간 소음·조명 습관이 상대의 민감도에 주는 영향, 수면 중 알람을 함께 계산합니다. 추가 문항 미응답은 샤워 15분·야간 행동 3/5·알람 2회로 임시 계산합니다. 모든 조합 중 수학적 최적임을 보장하는 값은 아닙니다.";
+const scoreDescription = "0~10점 생활 적합도: 수면 시간, 정리·온도·환기·조명·습도·여름 에어컨·겨울 히터 선호와 샤워 사용 구간을 비교합니다. 승인된 분리 요청은 점수보다 우선합니다. 이전 설문의 야간·알람 응답은 기존 계산을 유지하며 새 설문에는 묻지 않습니다. 수학적 최적해를 보장하지 않습니다.";
 type DeletedSurvey = { id: string; student_id: string; student_name: string; deleted_at: string };
 
 function RoomCard({ room }: { room: AssignedRoom<SurveyRow> }) {
@@ -37,6 +37,8 @@ export default function AdminPage() {
   const { isAuthenticated, adminKey, status, restoreError, authenticate, retryRestore, testEnabled, setTestEnabled } = useAdminSession();
   const [authError, setAuthError] = useState("");
   const [isSigningIn, setIsSigningIn] = useState(false);
+  const [avoidanceRequests, setAvoidanceRequests] = useState<SeparationRequest[]>([]);
+  const [reviewBusy,setReviewBusy] = useState(false);
   const [surveys, setSurveys] = useState<SurveyRow[]>([]);
   const [deletedSurveys, setDeletedSurveys] = useState<DeletedSurvey[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<SurveyRow | null>(null);
@@ -79,6 +81,7 @@ export default function AdminPage() {
     else {
       setErrorMessage("");
       const next = ((data?.surveys ?? []) as Omit<SurveyRow, "is_default">[]).map(survey => ({ ...survey, is_default: false }));
+      setAvoidanceRequests(data?.avoidance_requests ?? []);
       setSurveys(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next);
       const nextDeleted = (data?.deleted_surveys ?? []) as DeletedSurvey[];
       setDeletedSurveys(previous => JSON.stringify(previous) === JSON.stringify(nextDeleted) ? previous : nextDeleted);
@@ -110,7 +113,7 @@ export default function AdminPage() {
       void loadDashboard(adminKey, true);
     } else {
       requestVersion.current += 1;
-      setTestEnabled(false); setSurveys([]); setDeletedSurveys([]); setDeleteTarget(null);
+      setTestEnabled(false); setSurveys([]); setAvoidanceRequests([]); setDeletedSurveys([]); setDeleteTarget(null);
       setSettingsNotice(""); setErrorMessage(""); setDraftLayout(null); setSavedLayout(null);
       setManualAssignments([]); setSelectedStudentId(null); setDraggingStudentId(null); setHoverBed(null);
       setUndoPlacement(null); setPlacementMessage(""); setIncludeDefaults(false); setIsLoading(true);
@@ -143,6 +146,13 @@ export default function AdminPage() {
       setSettingsNotice(data ? restore ? "설문을 복구했습니다." : "설문을 삭제했습니다." : "다른 화면에서 이미 처리된 설문입니다.");
     }
     setChangingSurveyId(null);
+  }
+
+  async function reviewRequest(requestId:string, approve:boolean) {
+    setReviewBusy(true);
+    const {error}=await supabase.rpc("review_room_separation",{p_admin_key:adminKey,p_request_id:requestId,p_approve:approve});
+    if(error)setErrorMessage(error.message);else await loadDashboard(adminKey);
+    setReviewBusy(false);
   }
 
   async function signIn(event: FormEvent<HTMLFormElement>) {
@@ -190,7 +200,7 @@ export default function AdminPage() {
   }
 
   const schoolRosterSize = 3 * school.classCount * school.studentsPerClass;
-  const { effectiveLayout, roster, allocation } = useMemo(() => buildDormitoryView({ surveys, school, layout: savedLayout, manualAssignments, testEnabled, includeDefaults }), [surveys, school, savedLayout, manualAssignments, testEnabled, includeDefaults]);
+  const { effectiveLayout, roster, allocation } = useMemo(() => buildDormitoryView({ surveys, school, layout: savedLayout, manualAssignments, testEnabled, includeDefaults, avoidanceRequests }), [surveys, school, savedLayout, manualAssignments, testEnabled, includeDefaults, avoidanceRequests]);
   const roomsById = useMemo(() => new Map(allocation.rooms.map(room => [room.id, room])), [allocation.rooms]);
   const actualCount = roster.allStudents.filter(student => !student.is_default && !student.is_test).length;
   const testCount = roster.allStudents.filter(student => student.is_test).length;
@@ -278,7 +288,7 @@ export default function AdminPage() {
     <section className="test-panel admin-test-panel" aria-labelledby="test-mode-title"><div><h2 id="test-mode-title">{testEnabled ? "테스트 모드 사용 중" : "실제 운영 모드"}</h2>{!testEnabled && storedTestCount > 0 && <p>저장된 가상 학생 {storedTestCount}명은 현재 배정에서 제외되어 있습니다. 제거 버튼으로 DB에서도 정리할 수 있습니다.</p>}<label className="check-label defaults-option"><input type="checkbox" checked={includeDefaults} disabled={isChangingMode} onChange={event => void changeOperation(testEnabled, event.target.checked)} />미응답 학생도 기본값으로 배정</label></div><div className="test-actions"><button className="secondary-button" onClick={() => void createTestStudents()} disabled={isChangingMode || isLoading}>{isChangingMode ? "변경 중..." : testEnabled ? "테스트 학생 다시 생성" : "테스트 학생 생성"}</button>{(testEnabled || storedTestCount > 0) && <button className="danger-outline" onClick={() => void changeOperation(false, includeDefaults)} disabled={isChangingMode || isLoading}>{testEnabled ? "테스트 종료 · 가상 학생 제거" : "저장된 가상 학생 제거"}</button>}</div></section>
 
     </div></details><section className="summary-grid four-summary" aria-label="기숙사 배정 요약"><article><span>실제 설문 접수</span><strong>{roster.receivedStudents.length}명</strong><small>배정 대상 {actualCount}명 · 명단 확인 필요 {rosterReviewCount}명</small></article><article><span>건물 수용 정원</span><strong>{totalBeds}명</strong><small>{allocation.rooms.length}개 방 · 학교 명단 {schoolRosterSize}명</small></article><article><span>배정 / 미배정</span><strong>{assignedCount} / {allocation.waiting.length + rosterReviewCount}명</strong><small>실제 자리 부족 {waitingActual.length}명 · 명단 확인 {rosterReviewCount}명</small><small>테스트 {testCount}명 · 기본값 배정 {defaultCount}명</small></article><article><span>학년별 수용 정원</span><strong>{gradeBeds.join(" / ")}</strong><small>1학년 / 2학년 / 3학년 · 미응답 {missingCount}명</small></article></section>
-    {allocation.waiting.length > 0 && <section className="waiting-panel"><h2>자리 부족으로 배정 대기</h2><p>해당 학년의 방이나 인실을 늘리면 다시 계산합니다. 실제 응답자부터 배정합니다.</p><div>{allocation.waiting.map(student => <span key={student.student_id}>{student.student_name} · {student.student_id}{student.is_test ? " (테스트)" : student.is_default ? " (기본값)" : " (실제)"}</span>)}</div></section>}
+    {allocation.waiting.length > 0 && <section className="waiting-panel"><h2>자리·분리 조건으로 배정 대기</h2><p>해당 학년의 호실 정원과 승인된 분리 조건을 확인해 주세요. 실제 응답자부터 배정합니다.</p><div>{allocation.waiting.map(student => <span key={student.student_id}>{student.student_name} · {student.student_id}{student.is_test ? " (테스트)" : student.is_default ? " (기본값)" : " (실제)"}</span>)}</div></section>}
 
     <section className="admin-board received-surveys" aria-labelledby="received-title"><div className="board-heading"><div><h2 id="received-title">실제 설문 접수 명단</h2></div><span>{roster.receivedStudents.length}명</span></div>
       <div className="table-wrap"><table className="survey-table"><thead><tr><th>학번</th><th>이름</th><th>배정 상태</th><th>기상</th><th>취침</th><th>주로 씻기</th><th>최근 제출</th><th>관리</th></tr></thead><tbody>
@@ -292,6 +302,11 @@ export default function AdminPage() {
       </tbody></table></div>
     </section>
 
+    <section className="admin-board separation-review"><div className="board-heading"><h2>분리 배정 요청 검토</h2><span>{avoidanceRequests.filter(request=>request.status==="pending").length}건 대기</span></div>
+      <p className="avoidance-help">사유를 검토해 O(승인) 또는 X(기각)를 선택하세요. 승인 전에는 배정에 반영되지 않습니다. 사유가 바뀌면 다시 검토합니다.</p>
+      {avoidanceRequests.map(request=><article className="separation-review-row" key={request.id}><strong>{request.requester_id} {request.requester_name} → {request.target_student_id} {request.target_student_name}</strong><p>{request.reason}</p><div><span>{request.status==="approved"?"승인됨":request.status==="rejected"?"기각됨":"검토 대기"}</span><button type="button" aria-label={`${request.requester_id} 요청 승인`} aria-pressed={request.status==="approved"} disabled={reviewBusy} onClick={()=>void reviewRequest(request.id,true)}>O 승인</button><button type="button" className="secondary-button" aria-label={`${request.requester_id} 요청 기각`} aria-pressed={request.status==="rejected"} disabled={reviewBusy} onClick={()=>void reviewRequest(request.id,false)}>X 기각</button></div></article>)}
+      {!avoidanceRequests.length && <p className="avoidance-help">접수된 요청이 없습니다.</p>}
+    </section>
     <details className="deleted-survey-history"><summary>삭제된 설문 <span>{deletedSurveys.length}건</span></summary><div className="table-wrap"><table className="survey-table"><thead><tr><th>학번</th><th>이름</th><th>삭제 시각</th><th>관리</th></tr></thead><tbody>{deletedSurveys.map(student => <tr key={student.id}><td>{student.student_id}</td><td>{student.student_name}</td><td>{new Date(student.deleted_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", hour12: false })}</td><td><button type="button" className="secondary-button survey-row-restore" aria-label={`${student.student_id} ${student.student_name} 설문 복구`} disabled={!!changingSurveyId} onClick={() => void changeSurvey(student.id, true)}>{changingSurveyId === student.id ? "복구 중..." : "복구"}</button></td></tr>)}{deletedSurveys.length === 0 && <tr><td colSpan={4}><div className="empty-table">삭제된 설문이 없습니다</div></td></tr>}</tbody></table></div></details>
     {deleteTarget && <SurveyDeleteDialog student={deleteTarget} busy={changingSurveyId === deleteTarget.id} error={errorMessage} onCancel={() => setDeleteTarget(null)} onDelete={() => void changeSurvey(deleteTarget.id, false)} />}
 
@@ -316,8 +331,8 @@ export default function AdminPage() {
     </StudentPlacementProvider>
 
     <details className="pattern-details"><summary>학생별 생활 패턴<span>{schoolRosterSize}명</span></summary><section className="admin-board">
-      <div className="table-wrap"><table className="survey-table expanded-table"><thead><tr><th>구분</th><th>학번</th><th>이름</th><th>학년</th><th>기상</th><th>취침</th><th>주로 씻기</th><th>샤워 소요</th><th>청결</th><th>소음</th><th>조명</th><th>환기</th><th>야간 소음</th><th>야간 조명</th><th>알람 횟수</th><th>온도</th></tr></thead><tbody>
-        {!isLoading && roster.allStudents.map(student => <tr key={student.id}><td><span className={student.is_default ? "default-badge" : student.is_test ? "test-badge" : "live-badge"}>{student.is_default ? "미응답" : student.is_test ? "테스트" : "실제"}</span></td><td>{student.student_id}</td><td><strong>{student.student_name}</strong></td><td>{student.grade}학년</td><td>{student.wake_time.slice(0, 5)}</td><td>{student.sleep_time.slice(0, 5)}</td><td>{student.shower_time.slice(0, 5)}</td><td>{student.shower_duration_minutes==null?"미응답":student.shower_duration_minutes+"분"}</td><td>{student.flexible_preferences?.includes("tidiness") ? "상관없음" : student.tidiness + "/5"}</td><td>{student.noise_sensitivity}/5{student.alarm_sensitivity !== student.noise_sensitivity && <small>알람 {student.alarm_sensitivity}/5 (이전 응답)</small>}</td><td>{student.light_sensitivity}/5</td><td>{student.flexible_preferences?.includes("ventilation") ? "상관없음" : student.ventilation_preference + "/5"}</td><td>{student.night_noise_activity==null?"미응답":student.night_noise_activity+"/5"}</td><td>{student.night_light_usage==null?"미응답":student.night_light_usage+"/5"}</td><td>{student.alarm_repeats==null?"미응답":student.alarm_repeats+"회"}</td><td>{student.flexible_preferences?.includes("temperature") ? "상관없음" : student.preferred_temperature + "℃"}</td></tr>)}
+      <div className="table-wrap"><table className="survey-table expanded-table"><thead><tr><th>구분</th><th>학번</th><th>이름</th><th>학년</th><th>기상</th><th>취침</th><th>주로 씻기</th><th>샤워 소요</th><th>청결</th><th>소음</th><th>조명</th><th>환기</th><th>습도</th><th>여름 에어컨</th><th>겨울 히터</th><th>온도</th></tr></thead><tbody>
+        {!isLoading && roster.allStudents.map(student => <tr key={student.id}><td><span className={student.is_default ? "default-badge" : student.is_test ? "test-badge" : "live-badge"}>{student.is_default ? "미응답" : student.is_test ? "테스트" : "실제"}</span></td><td>{student.student_id}</td><td><strong>{student.student_name}</strong></td><td>{student.grade}학년</td><td>{student.wake_time.slice(0, 5)}</td><td>{student.sleep_time.slice(0, 5)}</td><td>{student.shower_time.slice(0, 5)}</td><td>{student.shower_duration_minutes==null?"미응답":student.shower_duration_minutes+"분"}</td><td>{student.flexible_preferences?.includes("tidiness") ? "상관없음" : student.tidiness + "/5"}</td><td>{student.noise_sensitivity}/5{student.alarm_sensitivity !== student.noise_sensitivity && <small>알람 {student.alarm_sensitivity}/5 (이전 응답)</small>}</td><td>{student.environment_answers?.version ? ({1:"큰 불 가능",3:"작은 불만",5:"모두 끔"} as Record<number,string>)[student.light_sensitivity] : student.light_sensitivity+"/5 (이전)"}</td><td>{student.flexible_preferences?.includes("ventilation") ? "상관없음" : student.ventilation_preference + "/5"}</td><td>{student.environment_answers?.humidity==null?"미응답":["상관없음","건조","보통","촉촉"][student.environment_answers.humidity]}</td><td>{student.environment_answers?.summer_ac==null?"미응답":["상관없음","끔","예약","계속 켬"][student.environment_answers.summer_ac]}</td><td>{student.environment_answers?.winter_heater==null?"미응답":["상관없음","끔","예약","계속 켬"][student.environment_answers.winter_heater]}</td><td>{student.flexible_preferences?.includes("temperature") ? "상관없음" : student.preferred_temperature + "℃"}</td></tr>)}
         {isLoading && <tr><td colSpan={16}><div className="empty-table">DB에서 설문을 불러오는 중입니다</div></td></tr>}
       </tbody></table></div>
     </section></details>

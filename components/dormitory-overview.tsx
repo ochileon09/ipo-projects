@@ -6,14 +6,14 @@ import { useAdminSession } from "./admin-session";
 import { Icon } from "./icon";
 import { supabase } from "@/lib/supabase/client";
 import { useAdminRealtime } from "@/lib/supabase/use-admin-realtime";
-import { buildDormitoryView } from "@/lib/dormitory-view";
+import { buildDormitoryView, type SeparationRequest } from "@/lib/dormitory-view";
 import { gridFromLegacyFloor, type DormLayout, type ManualAssignment } from "@/lib/dormitory-layout";
 import { spaceNames, spaceSymbols } from "@/lib/floor-grid";
 import type { SurveyRow } from "@/lib/student-roster";
 import { hasDetailedHabits } from "@/lib/roommate-matching";
 
 type Snapshot = {
-  surveys: SurveyRow[];
+  surveys: SurveyRow[]; avoidance_requests?: SeparationRequest[];
   school: { class_count: number; students_per_class: number; room_capacity: number };
   management: { layout: DormLayout | null; manual_assignments: ManualAssignment[]; include_defaults: boolean };
 };
@@ -21,6 +21,7 @@ type Snapshot = {
 export function DormitoryOverview() {
   const { isAuthenticated, adminKey, status, restoreError, retryRestore, testEnabled } = useAdminSession();
   const [snapshot, setSnapshot] = useState<{ key: string; data: Snapshot } | null>(null);
+  const [publicView,setPublicView] = useState<ReturnType<typeof buildDormitoryView>|null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [updatedAt, setUpdatedAt] = useState("");
@@ -29,12 +30,24 @@ export function DormitoryOverview() {
   const [roomId, setRoomId] = useState("");
   const requestVersion = useRef(0);
   const activeKey = useRef("");
-  activeKey.current = isAuthenticated ? adminKey : "";
+  activeKey.current = isAuthenticated ? adminKey : "public";
 
   const refresh = useCallback(async () => {
-    if (!activeKey.current || activeKey.current !== adminKey) return;
+    const key = isAuthenticated ? adminKey : "public";
+    if (activeKey.current !== key) return;
     const version = ++requestVersion.current;
     setLoading(true);
+    if (!isAuthenticated) {
+      try {
+        const response=await fetch("/api/overview",{cache:"no-store"});
+        if(!response.ok)throw new Error();
+        const result=await response.json();
+        if(version!==requestVersion.current||activeKey.current!==key)return;
+        setPublicView(result);setError("");setUpdatedAt(new Date().toLocaleTimeString("ko-KR",{hour12:false}));
+      } catch {if(version===requestVersion.current)setError("배정 정보를 불러오지 못했습니다.");}
+      if(version===requestVersion.current)setLoading(false);
+      return;
+    }
     const { data, error: failure } = await supabase.rpc("get_dormitory_dashboard_by_key", { p_admin_key: adminKey });
     if (version !== requestVersion.current || activeKey.current !== adminKey) return;
     if (failure || !data?.school || !data?.management) setError("최신 배정 정보를 불러오지 못했습니다. 다시 시도해 주세요.");
@@ -44,27 +57,28 @@ export function DormitoryOverview() {
       setError("");
     }
     setLoading(false);
-  }, [adminKey]);
+  }, [adminKey, isAuthenticated]);
 
   useEffect(() => {
-    activeKey.current = isAuthenticated ? adminKey : "";
-    setSnapshot(null); setError(""); setUpdatedAt("");
-    if (isAuthenticated) void refresh();
+    activeKey.current = isAuthenticated ? adminKey : "public";
+    setSnapshot(null); setPublicView(null); setError(""); setUpdatedAt("");
+    void refresh();
     return () => { requestVersion.current += 1; activeKey.current = ""; };
   }, [isAuthenticated, adminKey, refresh]);
-  const syncState = useAdminRealtime(isAuthenticated, refresh);
+  const syncState = useAdminRealtime(true, refresh);
   const current = isAuthenticated && snapshot?.key === adminKey ? snapshot.data : null;
-  const view = useMemo(() => current ? buildDormitoryView({
+  const privateView = useMemo(() => current ? buildDormitoryView({
     surveys: current.surveys.map(student => ({ ...student, is_default: false })),
     school: { classCount: current.school.class_count, studentsPerClass: current.school.students_per_class, roomCapacity: current.school.room_capacity },
     layout: current.management.layout,
     manualAssignments: current.management.manual_assignments ?? [],
     includeDefaults: current.management.include_defaults,
-    testEnabled,
+    testEnabled, avoidanceRequests: current.avoidance_requests,
   }) : null, [current, testEnabled]);
+  const view = isAuthenticated ? privateView : publicView;
 
   if (status === "restoring") return <section className="overview-gate"><h2>현재 방 배치</h2>{restoreError ? <><p role="alert">{restoreError}</p><button type="button" onClick={retryRestore}>다시 확인</button></> : <p role="status">인증 상태를 확인하는 중입니다.</p>}</section>;
-  if (!isAuthenticated) return <section className="overview-gate"><div><Icon name="building" size={26} /><h2>현재 방 배치</h2><p>관리자 인증 후 호실별 학생과 빈자리를 확인할 수 있습니다.</p></div><Link className="overview-manage-link" href="/admin">관리자 인증 <Icon name="arrow" size={16} /></Link></section>;
+
 
   const buildings = view?.effectiveLayout ?? [];
   const rooms = view?.allocation.rooms ?? [];
@@ -87,10 +101,10 @@ export function DormitoryOverview() {
     {error && <p className="notice error" role="alert">{error}{view && " 아래에는 마지막으로 불러온 배정이 표시됩니다."}</p>}
     {!view ? <p className="overview-loading" role="status">{error ? "배정 정보를 확인할 수 없습니다." : "배정 정보를 불러오는 중입니다."}</p> : <>
       <div className="overview-metrics" aria-label="현재 배정 요약">
-        <article><span>설문 접수</span><strong>{view.roster.receivedStudents.length}<small>명</small></strong><p>전체 명단 {3 * current!.school.class_count * current!.school.students_per_class}명</p></article>
+        <article><span>설문 접수</span><strong>{view.roster.receivedStudents.length}<small>명</small></strong><p>전체 명단 {view.schoolRosterSize}명</p></article>
         <article><span>배정 인원</span><strong>{view.assignedCount}<small>명</small></strong><p>{view.occupiedRooms}개 호실 사용 중</p></article>
         <article><span>빈자리</span><strong>{view.totalBeds - view.assignedCount}<small>자리</small></strong><p>전체 수용 {view.totalBeds}명</p></article>
-        <article><span>대기·확인 필요</span><strong>{view.waitingCount}<small>명</small></strong><p>자리 부족 또는 명단 확인</p></article>
+        <article><span>대기·확인 필요</span><strong>{view.waitingCount}<small>명</small></strong><p>자리·명단·분리 조건 확인</p></article>
       </div>
       <div className="overview-map-panel">
         <div className="overview-map-toolbar"><div className="overview-filters"><label><span>건물</span><select value={building?.id ?? ""} onChange={event => { setBuildingId(event.target.value); setFloorId(""); setRoomId(""); }}>{buildings.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label><span>층</span><select value={floor?.id ?? ""} onChange={event => { setBuildingId(building.id); setFloorId(event.target.value); setRoomId(""); }}>{floors.map(item => <option key={item.id} value={item.id}>{item.floor}층</option>)}</select></label></div><p>{floorRooms.length}개 방 · {floorAssigned}/{floorCapacity}명</p><Link className="help-link" href="/admin">배정 조정 <Icon name="arrow" size={15} /></Link></div>

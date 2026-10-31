@@ -19,6 +19,8 @@ export type MatchingStudent = {
   night_light_usage?: number | null;
   alarm_repeats?: number | null;
   flexible_preferences?: ("tidiness" | "ventilation" | "temperature")[];
+  environment_answers?: { version?: number; humidity?: number; summer_ac?: number; winter_heater?: number };
+  avoid_with?: string[];
 };
 
 function timeToMinutes(value: string) {
@@ -36,6 +38,7 @@ function similarity(first: number, second: number, range: number) {
 }
 
 export function hasDetailedHabits(student: MatchingStudent) {
+  if (student.environment_answers?.version === 1) return true;
   return [student.shower_duration_minutes, student.night_noise_activity, student.night_light_usage, student.alarm_repeats].every(value => value != null);
 }
 
@@ -63,15 +66,19 @@ export function roommateCompatibility(first: MatchingStudent, second: MatchingSt
   const preferenceSimilarity = (preference: "tidiness" | "ventilation" | "temperature", a: number, b: number, range: number) =>
     first.flexible_preferences?.includes(preference) || second.flexible_preferences?.includes(preference) ? 1 : similarity(a, b, range);
   const showerConflict = showerOverlapMinutes(first, second) / Math.min(first.shower_duration_minutes ?? 15, second.shower_duration_minutes ?? 15);
-  const noise = 1 - (disturbance(first.night_noise_activity, second.noise_sensitivity) + disturbance(second.night_noise_activity, first.noise_sensitivity)) / 2;
-  const light = 1 - (disturbance(first.night_light_usage, second.light_sensitivity) + disturbance(second.night_light_usage, first.light_sensitivity)) / 2;
-  const alarm = 1 - (alarmDisturbance(first, second) + alarmDisturbance(second, first)) / 2;
+  const noise = 1 - (disturbance(first.environment_answers?.version ? 1 : first.night_noise_activity, second.noise_sensitivity) + disturbance(second.environment_answers?.version ? 1 : second.night_noise_activity, first.noise_sensitivity)) / 2;
+  const light = first.environment_answers?.version && second.environment_answers?.version ? similarity(first.light_sensitivity, second.light_sensitivity, 4) : 1 - (disturbance(first.environment_answers?.version ? 1 : first.night_light_usage, second.light_sensitivity) + disturbance(second.environment_answers?.version ? 1 : second.night_light_usage, first.light_sensitivity)) / 2;
+  const alarm = 1 - (alarmDisturbance(first.environment_answers?.version ? {...first,alarm_repeats:0} : first, second) + alarmDisturbance(second.environment_answers?.version ? {...second,alarm_repeats:0} : second, first)) / 2;
+  const environment = first.environment_answers?.version || second.environment_answers?.version ? (["humidity", "summer_ac", "winter_heater"] as const).reduce((sum, key) => {
+    const a = first.environment_answers?.[key]; const b = second.environment_answers?.[key];
+    return sum + (a == null || b == null || a === 0 || b === 0 ? 1 : similarity(a,b,2));
+  }, 0) : 0;
   return similarity(circularTimeDifference(first.wake_time, second.wake_time), 0, 180) * 1.2
     + similarity(circularTimeDifference(first.sleep_time, second.sleep_time), 0, 240) * 1.4
     + preferenceSimilarity("tidiness", first.tidiness, second.tidiness, 4) * 1.1
     + preferenceSimilarity("temperature", first.preferred_temperature, second.preferred_temperature, 8) * 0.8
     + preferenceSimilarity("ventilation", first.ventilation_preference, second.ventilation_preference, 4) * 0.8
-    + noise * 1.8 + light * 1.4 + alarm * 1.0 + (1 - showerConflict) * 2.0;
+    + noise * 1.8 + light * 1.4 + alarm * 1.0 + (1 - showerConflict) * 2.0 + environment;
 }
 
 export function matchRoommates<T extends MatchingStudent>(students: T[], roomCapacity: number) {
@@ -109,12 +116,16 @@ export function roomCompatibilityScore<T extends MatchingStudent>(students: T[])
   let pairs = 0;
   students.forEach((student, index) => {
     students.slice(index + 1).forEach((roommate) => {
-      total += roommateCompatibility(student, roommate);
+      total += roommateCompatibility(student, roommate) / (student.environment_answers?.version || roommate.environment_answers?.version ? 14.5 : 11.5);
       pairs += 1;
     });
   });
   // Each component is in [0, 1]; the weights sum to 11.5.
-  return Math.round(Math.max(0, Math.min(10, total / pairs / 11.5 * 10)) * 10) / 10;
+  return Math.round(Math.max(0, Math.min(10, total / pairs * 10)) * 10) / 10;
+}
+
+export function canShareRoom(a: MatchingStudent, b: MatchingStudent) {
+  return !a.avoid_with?.includes(b.student_id) && !b.avoid_with?.includes(a.student_id);
 }
 
 export function assignmentPriority(student: MatchingStudent) {
@@ -130,19 +141,21 @@ export function optimizeRoomAssignments<T extends MatchingStudent>(students: T[]
   const scoreCache = new Map<string, number>();
   function score(a: T, b: T) {
     const key = [a.student_id, b.student_id].sort().join(":");
-    if (!scoreCache.has(key)) scoreCache.set(key, roommateCompatibility(a, b));
+    if (!scoreCache.has(key)) scoreCache.set(key, roommateCompatibility(a, b) / (a.environment_answers?.version || b.environment_answers?.version ? 14.5 : 11.5));
     return scoreCache.get(key)!;
   }
   const rooms = capacities.map((capacity) => {
     const room: T[] = [];
     if (remaining.length && capacity > 0) room.push(remaining.shift()!);
     while (room.length < capacity && remaining.length) {
-      let bestIndex = 0;
+      let bestIndex = -1;
       let bestScore = -Infinity;
       remaining.forEach((candidate, index) => {
+        if (!room.every(member => canShareRoom(member,candidate))) return;
         const value = room.reduce((total, member) => total + score(member, candidate), 0) / room.length;
         if (value > bestScore) { bestScore = value; bestIndex = index; }
       });
+      if (bestIndex < 0) break;
       room.push(remaining.splice(bestIndex, 1)[0]);
     }
     return room;
@@ -158,6 +171,7 @@ export function optimizeRoomAssignments<T extends MatchingStudent>(students: T[]
         let bestGain = 0.0001; let best: [number, number] | null = null;
         for (let ai = 0; ai < a.length; ai += 1) for (let bi = 0; bi < b.length; bi += 1) {
           const left = a[ai]; const right = b[bi];
+          if (!a.every((member,index)=>index===ai || canShareRoom(member,right)) || !b.every((member,index)=>index===bi || canShareRoom(member,left))) continue;
           const gainA = a.reduce((sum, other, index) => sum + (index === ai ? 0 : score(right, other) - score(left, other)), 0) / aPairs;
           const gainB = b.reduce((sum, other, index) => sum + (index === bi ? 0 : score(left, other) - score(right, other)), 0) / bPairs;
           if (gainA + gainB > bestGain) { bestGain = gainA + gainB; best = [ai, bi]; }
@@ -171,5 +185,5 @@ export function optimizeRoomAssignments<T extends MatchingStudent>(students: T[]
     }
     if (!improved) break;
   }
-  return { rooms, waiting };
+  return { rooms, waiting: [...remaining, ...waiting] };
 }

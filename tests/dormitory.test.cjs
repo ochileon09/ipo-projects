@@ -307,3 +307,35 @@ test('repeated manual moves and swaps maintain unique occupancy, room capacities
     assert(result.rooms.every(r=>r.students.length<=r.capacity&&r.beds.length===r.capacity&&r.students.every(s=>s.grade===r.grade)));
   }
 });
+
+
+test('approved separation is enforced in automatic rooms and overrides conflicting old manual pins',()=>{
+ const a=student('2101',{avoid_with:['2102']});const b=student('2102');const c=student('2103');
+ const layout=[{id:'a',name:'A',diningSide:'none',provisional:false,floors:[{...newFloor(2,2,2),leftRooms:1,rightRooms:1}]}];
+ const base=allocateDormitory([a,b,c],layout);
+ assert(base.rooms.every(room=>!(room.students.some(s=>s.student_id==='2101')&&room.students.some(s=>s.student_id==='2102'))));
+ const first=base.rooms[0];
+ const pinned=allocateDormitory([a,b,c],layout,[{studentId:'2101',roomId:first.id,bedIndex:0},{studentId:'2102',roomId:first.id,bedIndex:1}]);
+ assert.equal(pinned.rooms.flatMap(room=>room.students).length,3);
+ assert(pinned.rooms.every(room=>!(room.students.some(s=>s.student_id==='2101')&&room.students.some(s=>s.student_id==='2102'))));
+ const full=optimizeRoomAssignments([a,b],[2]);assert.equal(full.waiting.length,1);
+ const destination=base.rooms.find(room=>room.students.some(s=>s.student_id==='2101'));
+ assert.throws(()=>planManualMove(base.rooms,[],'2102',{roomId:destination.id,bedIndex:destination.beds.findIndex(s=>s?.student_id!=='2101')}),/분리/);
+});
+test('environment preferences affect fit while any and removed night/alarm answers do not penalize new surveys',()=>{
+ const env={version:1,humidity:1,summer_ac:1,winter_heater:1};
+ const a=student('2101',{environment_answers:env});const b=student('2102',{environment_answers:env,shower_time:'22:00'});
+ assert(roomCompatibilityScore([a,b])>roomCompatibilityScore([a,{...b,environment_answers:{version:1,humidity:3,summer_ac:3,winter_heater:3}}]));
+ assert.equal(roomCompatibilityScore([a,b]),roomCompatibilityScore([a,{...b,environment_answers:{version:1,humidity:0,summer_ac:0,winter_heater:0},night_noise_activity:5,night_light_usage:5,alarm_repeats:5}]));
+});
+
+test('only approved matching identities activate separation in the shared dashboard/editor projection',()=>{
+ const surveys=[student('2101'),student('2102')];
+ const request={id:'request',survey_id:'2101',requester_id:'2101',requester_name:'학생2101',target_student_id:'2102',target_student_name:'학생2102',reason:'검토 사유',status:'pending'};
+ const input={surveys,school:{classCount:6,studentsPerClass:16,roomCapacity:2},layout:null,manualAssignments:[],testEnabled:false,includeDefaults:false};
+ for(const status of ['pending','rejected'])assert(buildDormitoryView({...input,avoidanceRequests:[{...request,status}]}).allocation.rooms.some(room=>room.students.length===2));
+ const approved=buildDormitoryView({...input,avoidanceRequests:[{...request,status:'approved'}]});
+ assert(approved.allocation.rooms.every(room=>room.students.length<2));
+ assert.deepEqual(approved.roster.activeStudents[0].avoid_with,['2102']);
+ assert(buildDormitoryView({...input,avoidanceRequests:[{...request,status:'approved',target_student_name:'동명이인 아님'}]}).allocation.rooms.some(room=>room.students.length===2));
+});

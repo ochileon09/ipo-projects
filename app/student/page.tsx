@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
+import Link from "next/link";
 
 function ScoreField({ name, title, low, high }: { name: string; title: string; low: string; high: string }) {
   return <fieldset className="score-field">
@@ -84,17 +85,16 @@ export default function StudentApplicationPage() {
   }
 
   return <main>
-    <header className="hero">
-      <div className="hero-copy"><p className="eyebrow">학생 신청용</p><h1>기숙사 생활 습관<br />설문 신청</h1>
-        <p className="lead">호실 배정에 필요한 기본 정보와 생활 습관을 입력합니다. 입력한 내용은 이후 룸메이트 배정에 활용됩니다.</p></div>
-      <div className="hero-card" aria-label="설문 접수 상태"><span className="status-dot" /><div><strong>{connection}</strong><p>작성 후 제출 버튼을 눌러주세요</p></div></div>
+    <header className="survey-heading">
+      <div className="page-title"><h1>학생 설문</h1><Link className="help-link" href="/help#student">작성 도움말</Link></div>
+      <div className="survey-meta"><span>최근 2주 평일 기준 · * 필수</span><span role="status">{connection}</span></div>
     </header>
 
     {notice && <p className={`notice ${noticeKind}`} role="status">{notice}</p>}
 
     <form className="survey" onSubmit={handleSubmit}>
       <section className="form-section">
-        <div className="section-heading"><span>01</span><div><h2>학생 기본 정보</h2><p>같은 학번과 이름으로 다시 제출하면 기존 설문이 새 응답으로 갱신됩니다.</p></div></div>
+        <div className="section-heading"><h2>기본 정보</h2></div>
         <div className="grid two-columns">
           <label><span>학번 <b className="required-star">*</b></span><input name="studentId" inputMode="numeric" pattern="[1-3][1-9](0[1-9]|[12][0-9]|30)" placeholder="예: 2602" required maxLength={4} title="학년·반·번호 순서의 네 자리 학번을 입력하세요." value={studentId} onChange={(event) => setStudentId(event.target.value.replace(/\D/g, "").slice(0, 4))} /><small>1~3학년의 네 자리 학번을 입력합니다.</small></label>
           <label><span>이름 <b className="required-star">*</b></span><input name="name" placeholder="이름 입력" required maxLength={30} /></label>
@@ -102,18 +102,18 @@ export default function StudentApplicationPage() {
         </div>
       </section>
       <section className="form-section">
-        <div className="section-heading"><span>02</span><div><h2>생활 리듬</h2><p>최근 2주 평일의 기숙사 생활을 기준으로 입력하세요.</p></div></div>
+        <div className="section-heading"><h2>생활 리듬</h2></div>
         <div className="grid two-columns">
           <label><span>평균 기상 시간 <b className="required-star">*</b></span><input type="time" name="wakeTime" defaultValue="07:30" required /></label>
           <label><span>평균 취침 시간 <b className="required-star">*</b></span><input type="time" name="sleepTime" defaultValue="00:30" required /></label>
           <label><span>주로 씻는 시간 <b className="required-star">*</b></span><input type="time" name="showerTime" defaultValue="07:40" required /><small>하루 중 가장 자주 씻는 시간을 입력하세요.</small></label>
-          <label><span>샤워 1회 소요 시간 <b className="required-star">*</b></span><select name="showerDuration" defaultValue="" required><option value="" disabled>평균 소요 시간을 선택하세요</option>{[5,10,15,20,30,45,60].map(minutes=><option key={minutes} value={minutes}>{minutes}분{minutes===60?" 정도":""}</option>)}</select><small>샤워 공간을 사용하는 시간을 기준으로 입력하세요. 사용 시간이 겹치는지 계산합니다.</small></label>
+          <label><span>샤워 1회 소요 시간 <b className="required-star">*</b></span><select name="showerDuration" defaultValue="" required><option value="" disabled>평균 소요 시간을 선택하세요</option>{[5,10,15,20,30,45,60].map(minutes=><option key={minutes} value={minutes}>{minutes}분{minutes===60?" 정도":""}</option>)}</select></label>
           <label><span>하루 샤워 횟수 <b className="required-star">*</b></span><select name="showerFrequency" defaultValue="1" required><option value="1">1회</option><option value="2">2회</option><option value="3">3회 이상</option></select></label>
-          <label><span>기상할 때 알람이 울리는 횟수 <b className="required-star">*</b></span><select name="alarmRepeats" defaultValue="" required><option value="" disabled>스누즈를 포함해 선택하세요</option><option value="0">알람을 사용하지 않음</option>{[1,2,3,4,5].map(count=><option key={count} value={count}>{count}회{count===5?" 이상":""}</option>)}</select><small>다시 울림(스누즈)을 포함합니다. 룸메이트가 자는 시간에 울리는 알람을 고려합니다.</small></label>
+          <label><span>기상 알람 횟수 (스누즈 포함) <b className="required-star">*</b></span><select name="alarmRepeats" defaultValue="" required><option value="" disabled>횟수를 선택하세요</option><option value="0">알람을 사용하지 않음</option>{[1,2,3,4,5].map(count=><option key={count} value={count}>{count}회{count===5?" 이상":""}</option>)}</select></label>
         </div>
       </section>
       <section className="form-section">
-        <div className="section-heading"><span>03</span><div><h2>생활 습관과 선호</h2><p>각 항목에서 자신과 가장 가까운 정도를 선택하세요.</p></div></div>
+        <div className="section-heading"><h2>생활 습관과 선호</h2></div>
         <div className="grid two-columns">
           <ScoreField name="tidiness" title="청결·정리 민감도" low="크게 신경 쓰지 않음" high="매우 민감함" />
           <ScoreField name="noise" title="소음 민감도" low="둔감" high="민감" />
@@ -127,13 +127,13 @@ export default function StudentApplicationPage() {
         <label className="wide-label"><span>방 위치 배려가 필요한 신체적 사유 <b className="optional-mark">(선택)</b></span><textarea name="accessibility" rows={3} placeholder="없으면 비워 두어도 됩니다." maxLength={500} /></label>
       </section>
       <section className="form-section">
-        <div className="section-heading"><span>04</span><div><h2>룸메이트가 잠든 뒤의 습관</h2><p>최근 2주 평일을 기준으로, 다른 룸메이트가 잠든 뒤의 행동을 선택하세요.</p></div></div>
+        <div className="section-heading"><h2>룸메이트가 잠든 뒤의 습관</h2></div>
         <div className="grid two-columns">
           <NightActivityField name="nightNoiseActivity" title="통화·대화 등 소리가 나는 활동 빈도" />
           <NightActivityField name="nightLightUsage" title="스탠드나 조명을 켜 두는 빈도" />
         </div>
       </section>
-      <div className="form-footer"><p>제출한 생활 습관은 룸메이트와 호실 배정에 활용됩니다.</p><button type="submit" disabled={isSaving}>{isSaving ? "제출 중..." : "설문 제출하기"}</button></div>
+      <div className="form-footer"><button type="submit" disabled={isSaving}>{isSaving ? "제출 중..." : "설문 제출하기"}</button></div>
     </form>
   </main>;
 }

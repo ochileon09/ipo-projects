@@ -59,6 +59,22 @@ test('repeated alarms matter while a roommate is asleep, and unanswered habits s
   assert.equal(createDefaultRoster(1,1)[0].shower_duration_minutes,null);
 });
 
+test('explicit indifference removes only the selected preference mismatch, symmetrically', () => {
+  const a = student('2101', { tidiness: 1, preferred_temperature: 20, ventilation_preference: 1 });
+  const b = student('2102', { tidiness: 5, preferred_temperature: 24, ventilation_preference: 5, shower_time: '22:00' });
+  const baseline = roommateCompatibility(a, b);
+  for (const [preference, field] of [['tidiness', 'tidiness'], ['temperature', 'preferred_temperature'], ['ventilation', 'ventilation_preference']]) {
+    const flexible = { ...a, flexible_preferences: [preference] };
+    assert(roommateCompatibility(flexible, b) > baseline);
+    assert.equal(roommateCompatibility(flexible, b), roommateCompatibility({ ...a, [field]: b[field] }, b));
+    assert.equal(roommateCompatibility(flexible, b), roommateCompatibility(b, flexible));
+  }
+  assert.equal(roommateCompatibility({ ...a, flexible_preferences: [] }, b), baseline);
+  const flexible = { ...a, flexible_preferences: ['tidiness', 'temperature', 'ventilation'] };
+  assert.equal(roomCompatibilityScore([flexible, b]), 10);
+  assert(roommateCompatibility(flexible, b) > roommateCompatibility(flexible, { ...b, night_noise_activity: 5 }));
+});
+
 test('real response beats a newer test response and repeated real responses use newest', () => {
   const latestReal = student('2101', { id: 'real-new', created_at: '2026-10-02T00:00:00Z' });
   const roster = selectRoster([student('2101', { id: 'test', is_test: true, created_at: '2026-10-27T00:00:00Z' }), student('2101', { id: 'real-old' }), latestReal], 6, 16, true, false);

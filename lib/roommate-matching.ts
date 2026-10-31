@@ -18,6 +18,7 @@ export type MatchingStudent = {
   night_noise_activity?: number | null;
   night_light_usage?: number | null;
   alarm_repeats?: number | null;
+  flexible_preferences?: ("tidiness" | "ventilation" | "temperature")[];
 };
 
 function timeToMinutes(value: string) {
@@ -59,15 +60,17 @@ function alarmDisturbance(source: MatchingStudent, sleeper: MatchingStudent) {
 }
 
 export function roommateCompatibility(first: MatchingStudent, second: MatchingStudent) {
+  const preferenceSimilarity = (preference: "tidiness" | "ventilation" | "temperature", a: number, b: number, range: number) =>
+    first.flexible_preferences?.includes(preference) || second.flexible_preferences?.includes(preference) ? 1 : similarity(a, b, range);
   const showerConflict = showerOverlapMinutes(first, second) / Math.min(first.shower_duration_minutes ?? 15, second.shower_duration_minutes ?? 15);
   const noise = 1 - (disturbance(first.night_noise_activity, second.noise_sensitivity) + disturbance(second.night_noise_activity, first.noise_sensitivity)) / 2;
   const light = 1 - (disturbance(first.night_light_usage, second.light_sensitivity) + disturbance(second.night_light_usage, first.light_sensitivity)) / 2;
   const alarm = 1 - (alarmDisturbance(first, second) + alarmDisturbance(second, first)) / 2;
   return similarity(circularTimeDifference(first.wake_time, second.wake_time), 0, 180) * 1.2
     + similarity(circularTimeDifference(first.sleep_time, second.sleep_time), 0, 240) * 1.4
-    + similarity(first.tidiness, second.tidiness, 4) * 1.1
-    + similarity(first.preferred_temperature, second.preferred_temperature, 8) * 0.8
-    + similarity(first.ventilation_preference, second.ventilation_preference, 4) * 0.8
+    + preferenceSimilarity("tidiness", first.tidiness, second.tidiness, 4) * 1.1
+    + preferenceSimilarity("temperature", first.preferred_temperature, second.preferred_temperature, 8) * 0.8
+    + preferenceSimilarity("ventilation", first.ventilation_preference, second.ventilation_preference, 4) * 0.8
     + noise * 1.8 + light * 1.4 + alarm * 1.0 + (1 - showerConflict) * 2.0;
 }
 

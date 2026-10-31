@@ -13,6 +13,8 @@ type AdminSession = {
   authenticate: (key: string) => Promise<string | null>;
   retryRestore: () => void;
   logout: () => void;
+  testEnabled: boolean;
+  setTestEnabled: (enabled: boolean) => void;
 };
 const Context = createContext<AdminSession | null>(null);
 
@@ -20,12 +22,13 @@ export function AdminSessionProvider({ children }: { children: ReactNode }) {
   const [adminKey, setAdminKey] = useState("");
   const [status, setStatus] = useState<SessionStatus>("restoring");
   const [restoreError, setRestoreError] = useState("");
+  const [testEnabled, setTestEnabled] = useState(false);
   const version = useRef(0);
 
   const logout = useCallback(() => {
     version.current += 1;
     try { sessionStorage.removeItem(storageKey); } catch { /* 메모리의 인증도 함께 해제합니다. */ }
-    setAdminKey(""); setStatus("signedOut"); setRestoreError("");
+    setAdminKey(""); setStatus("signedOut"); setRestoreError(""); setTestEnabled(false);
   }, []);
 
   const restore = useCallback(async () => {
@@ -66,7 +69,7 @@ export function AdminSessionProvider({ children }: { children: ReactNode }) {
     return null;
   }, []);
 
-  return <Context.Provider value={{ adminKey, status, isAuthenticated: status === "authenticated", restoreError, authenticate, retryRestore: () => { void restore(); }, logout }}>{children}</Context.Provider>;
+  return <Context.Provider value={{ adminKey, status, isAuthenticated: status === "authenticated", restoreError, authenticate, retryRestore: () => { void restore(); }, logout, testEnabled, setTestEnabled }}>{children}</Context.Provider>;
 }
 
 export function useAdminSession() {

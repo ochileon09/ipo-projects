@@ -7,10 +7,33 @@ const { createFloorGrid, expandSelection, paintGrid, mergeGrid, splitGrid, moveG
 const { floorRooms, gridFromLegacyFloor } = require('../.codex_tmp/matching-tests/dormitory-layout.js');
 const { planManualMove } = require('../.codex_tmp/matching-tests/dormitory-layout.js');
 const { roommateCompatibility, showerOverlapMinutes, hasDetailedHabits } = require('../.codex_tmp/matching-tests/roommate-matching.js');
+const { buildDormitoryView } = require('../.codex_tmp/matching-tests/dormitory-view.js');
 
 function student(studentId, overrides = {}) {
   return { ...createDefaultRoster(6, 16).find(row => row.student_id === studentId), id: studentId, is_default: false, student_name: '학생' + studentId, created_at: '2026-10-01T00:00:00Z', shower_duration_minutes:10,night_noise_activity:1,night_light_usage:1,alarm_repeats:0,...overrides };
 }
+
+test('dashboard and editor projection retains manual beds and applies live/test/default modes consistently', () => {
+  const input = {
+    surveys: [student('2101'), student('2102'), student('2103', { is_test: true }), student('2201')],
+    school: { classCount: 1, studentsPerClass: 4, roomCapacity: 2 },
+    layout: null, manualAssignments: [], testEnabled: false, includeDefaults: false,
+  };
+  const live = buildDormitoryView(input);
+  assert.equal(live.assignedCount, 2);
+  assert.equal(live.roster.receivedStudents.length, 3);
+  assert.equal(live.waitingCount, 1); // A received response outside configured class counts still needs review.
+  assert.equal(live.totalBeds, 12);
+  const target = live.allocation.rooms.filter(room => room.grade === 2)[1];
+  const pinned = buildDormitoryView({ ...input, manualAssignments: [{ studentId: '2101', roomId: target.id, bedIndex: 1 }] });
+  assert.equal(pinned.allocation.rooms.find(room => room.id === target.id).beds[1].student_id, '2101');
+  assert.equal(pinned.assignedCount, 2);
+  assert.equal(buildDormitoryView({ ...input, testEnabled: true }).assignedCount, 3);
+  const defaults = buildDormitoryView({ ...input, includeDefaults: true });
+  assert.equal(defaults.assignedCount, 12);
+  assert.equal(defaults.totalBeds - defaults.assignedCount, 0);
+  assert.equal(defaults.waitingCount, 1);
+});
 
 test('scores stay within 0–10 and distinguish overlapping showers; single occupancy is not rated', () => {
   const a = student('2101'); const b = student('2102');

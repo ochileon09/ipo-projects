@@ -8,13 +8,13 @@ import { FloorGridMap } from "@/components/floor-grid-map";
 import { SurveyDeleteDialog } from "@/components/survey-delete-dialog";
 import { useAdminRealtime } from "@/lib/supabase/use-admin-realtime";
 import { StudentBed, StudentPlacementProvider } from "@/components/student-bed";
-import { allocateDormitory, createDefaultLayout, validateLayout, planManualMove, type AssignedRoom, type BedAddress, type ManualAssignment, type DormLayout, type FloorLayout } from "@/lib/dormitory-layout";
-import { isSchoolStudentId, selectRoster, type SurveyRow } from "@/lib/student-roster";
+import { validateLayout, planManualMove, type AssignedRoom, type BedAddress, type ManualAssignment, type DormLayout, type FloorLayout } from "@/lib/dormitory-layout";
+import { isSchoolStudentId, type SurveyRow } from "@/lib/student-roster";
+import { buildDormitoryView, type SchoolSettings } from "@/lib/dormitory-view";
 import { hasDetailedHabits } from "@/lib/roommate-matching";
 import { useAdminSession } from "@/components/admin-session";
 
 const scoreDescription = "0~10점 생활 패턴 적합도: 취침·기상·청결·온도·환기, 샤워 사용 구간의 겹침, 야간 소음·조명 습관이 상대의 민감도에 주는 영향, 수면 중 알람을 함께 계산합니다. 추가 문항 미응답은 샤워 15분·야간 행동 3/5·알람 2회로 임시 계산합니다. 모든 조합 중 수학적 최적임을 보장하는 값은 아닙니다.";
-type SchoolSettings = { classCount: number; studentsPerClass: number; roomCapacity: number };
 type DeletedSurvey = { id: string; student_id: string; student_name: string; deleted_at: string };
 
 function RoomCard({ room }: { room: AssignedRoom<SurveyRow> }) {
@@ -34,7 +34,7 @@ function facilities(floor: FloorLayout, side: "left" | "right") {
 }
 
 export default function AdminPage() {
-  const { isAuthenticated, adminKey, status, restoreError, authenticate, retryRestore } = useAdminSession();
+  const { isAuthenticated, adminKey, status, restoreError, authenticate, retryRestore, testEnabled, setTestEnabled } = useAdminSession();
   const [authError, setAuthError] = useState("");
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [surveys, setSurveys] = useState<SurveyRow[]>([]);
@@ -53,7 +53,6 @@ export default function AdminPage() {
   const [hoverBed, setHoverBed] = useState<string | null>(null);
   const [placementMessage, setPlacementMessage] = useState("");
   const [undoPlacement, setUndoPlacement] = useState<{assignments:ManualAssignment[];revision:number}|null>(null);
-  const [testEnabled, setTestEnabled] = useState(false);
   const [includeDefaults, setIncludeDefaults] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
@@ -118,7 +117,7 @@ export default function AdminPage() {
       previousAssignments.current = new Map(); schoolDraftDirty.current = false; setMovedCount(0);
     }
     return () => { dashboardActive.current = false; requestVersion.current += 1; };
-  }, [isAuthenticated, adminKey, loadDashboard]);
+  }, [isAuthenticated, adminKey, loadDashboard, setTestEnabled]);
 
   const refresh = useCallback(() => loadDashboard(adminKey), [adminKey, loadDashboard]);
   const syncState = useAdminRealtime(isAuthenticated, refresh);
@@ -191,11 +190,7 @@ export default function AdminPage() {
   }
 
   const schoolRosterSize = 3 * school.classCount * school.studentsPerClass;
-  const studentsPerGrade = school.classCount * school.studentsPerClass;
-  const automaticLayout = useMemo(() => createDefaultLayout(studentsPerGrade, school.roomCapacity), [studentsPerGrade, school.roomCapacity]);
-  const effectiveLayout = savedLayout ?? automaticLayout;
-  const roster = useMemo(() => selectRoster(surveys, school.classCount, school.studentsPerClass, testEnabled, includeDefaults), [surveys, school.classCount, school.studentsPerClass, testEnabled, includeDefaults]);
-  const allocation = useMemo(() => allocateDormitory(roster.activeStudents, effectiveLayout, manualAssignments), [roster.activeStudents, effectiveLayout, manualAssignments]);
+  const { effectiveLayout, roster, allocation } = useMemo(() => buildDormitoryView({ surveys, school, layout: savedLayout, manualAssignments, testEnabled, includeDefaults }), [surveys, school, savedLayout, manualAssignments, testEnabled, includeDefaults]);
   const roomsById = useMemo(() => new Map(allocation.rooms.map(room => [room.id, room])), [allocation.rooms]);
   const actualCount = roster.allStudents.filter(student => !student.is_default && !student.is_test).length;
   const testCount = roster.allStudents.filter(student => student.is_test).length;

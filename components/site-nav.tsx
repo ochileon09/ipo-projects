@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ReactNode, useEffect, useState } from "react";
 import { Icon, type IconName } from "@/components/icon";
+import { useAdminSession } from "@/components/admin-session";
 
 const links = [
   { href: "/", label: "대시보드", icon: "dashboard" as IconName },
@@ -13,6 +14,7 @@ const links = [
 ];
 
 export function SiteShell({ children }: { children: ReactNode }) {
+  const { adminKey, logout } = useAdminSession();
   const pathname = usePathname();
   const [theme, setTheme] = useState<"light" | "dark">("light");
 
@@ -36,6 +38,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
           <span>roomfit<span className="brand-period">.</span></span>
         </Link>
         <div className="shell-top-actions">
+          {adminKey && <button className="session-logout" type="button" onClick={logout}>로그아웃</button>}
           <button className="theme-toggle" type="button" onClick={toggleTheme} aria-label={theme === "light" ? "다크 테마로 변경" : "라이트 테마로 변경"} title={theme === "light" ? "다크 테마" : "라이트 테마"}>
             <Icon name={theme === "light" ? "moon" : "sun"} size={18} />
             <b>{theme === "light" ? "다크" : "라이트"}</b>

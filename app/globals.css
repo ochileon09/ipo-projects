@@ -66,10 +66,13 @@ h2 { margin: 0; font-size: 20px; line-height: 1.45; letter-spacing: -.035em; fon
 .brand { display: inline-flex; align-items: center; gap: 10px; font-size: 25px; letter-spacing: -.065em; font-weight: 750; line-height: 1; }
 .brand-period { color: var(--shell-accent); }
 .brand-mark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 11px; background: #3165dc; color: white; }
-.shell-top-actions { display: flex; align-items: center; gap: 24px; }
+.shell-top-actions { display: flex; align-items: center; gap: 8px; }
+.session-logout { min-height:38px; padding:8px 12px; border-color:var(--shell-border); background:var(--shell-panel); color:var(--shell-text); font-size:12px; font-weight:500; }
+.session-logout:hover { background:var(--shell-accent-soft); border-color:var(--shell-accent); color:var(--shell-accent); }
 .theme-toggle { min-height: 38px; padding: 8px 12px; border-color: var(--shell-border); background: var(--shell-panel); color: var(--shell-text); font-size: 12px; }
 .theme-toggle b { font-weight: 550; }
 .theme-toggle:hover { background: var(--shell-accent-soft); border-color: var(--shell-accent); }
+@media (max-width:380px) { .theme-toggle b { display:none; } }
 .shell-sidebar { position: fixed; inset: 72px auto 0 0; z-index: 30; width: 228px; display: flex; flex-direction: column; justify-content: space-between; padding: 32px 16px 24px; border-right: 1px solid var(--shell-border); background: var(--shell-sidebar); }
 .shell-sidebar nav { display: grid; gap: 7px; }
 .shell-sidebar nav a { position: relative; display: flex; align-items: center; gap: 12px; min-height: 46px; padding: 10px 14px; border-radius: 9px; color: var(--shell-muted); font-size: 13px; }

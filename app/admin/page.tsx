@@ -11,6 +11,7 @@ import { StudentBed, StudentPlacementProvider } from "@/components/student-bed";
 import { allocateDormitory, createDefaultLayout, validateLayout, planManualMove, type AssignedRoom, type BedAddress, type ManualAssignment, type DormLayout, type FloorLayout } from "@/lib/dormitory-layout";
 import { isSchoolStudentId, selectRoster, type SurveyRow } from "@/lib/student-roster";
 import { hasDetailedHabits } from "@/lib/roommate-matching";
+import { useAdminSession } from "@/components/admin-session";
 
 const scoreDescription = "0~10점 생활 패턴 적합도: 취침·기상·청결·온도·환기, 샤워 사용 구간의 겹침, 야간 소음·조명 습관이 상대의 민감도에 주는 영향, 수면 중 알람을 함께 계산합니다. 추가 문항 미응답은 샤워 15분·야간 행동 3/5·알람 2회로 임시 계산합니다. 모든 조합 중 수학적 최적임을 보장하는 값은 아닙니다.";
 type SchoolSettings = { classCount: number; studentsPerClass: number; roomCapacity: number };
@@ -33,8 +34,7 @@ function facilities(floor: FloorLayout, side: "left" | "right") {
 }
 
 export default function AdminPage() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [adminKey, setAdminKey] = useState("");
+  const { isAuthenticated, adminKey, status, restoreError, authenticate, retryRestore } = useAdminSession();
   const [authError, setAuthError] = useState("");
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [surveys, setSurveys] = useState<SurveyRow[]>([]);
@@ -66,12 +66,16 @@ export default function AdminPage() {
   const requestVersion = useRef(0);
   const previousAssignments = useRef(new Map<string, string>());
   const schoolDraftDirty = useRef(false);
+  const dashboardActive = useRef(false);
+  const sessionKey = useRef("");
+  sessionKey.current = isAuthenticated ? adminKey : "";
 
   const loadDashboard = useCallback(async (schoolKey: string, withSettings = false) => {
+    if (!dashboardActive.current || sessionKey.current !== schoolKey) return;
     const version = ++requestVersion.current;
     if (withSettings) setIsLoading(true);
     const { data, error } = await supabase.rpc("get_dormitory_dashboard_by_key", { p_admin_key: schoolKey });
-    if (version !== requestVersion.current) return;
+    if (version !== requestVersion.current || !dashboardActive.current || sessionKey.current !== schoolKey) return;
     if (error) setErrorMessage("DB 조회 실패: " + error.message);
     else {
       setErrorMessage("");
@@ -100,6 +104,21 @@ export default function AdminPage() {
     }
     setIsLoading(false);
   }, []);
+
+  useEffect(() => {
+    dashboardActive.current = isAuthenticated;
+    if (isAuthenticated) {
+      void loadDashboard(adminKey, true);
+    } else {
+      requestVersion.current += 1;
+      setTestEnabled(false); setSurveys([]); setDeletedSurveys([]); setDeleteTarget(null);
+      setSettingsNotice(""); setErrorMessage(""); setDraftLayout(null); setSavedLayout(null);
+      setManualAssignments([]); setSelectedStudentId(null); setDraggingStudentId(null); setHoverBed(null);
+      setUndoPlacement(null); setPlacementMessage(""); setIncludeDefaults(false); setIsLoading(true);
+      previousAssignments.current = new Map(); schoolDraftDirty.current = false; setMovedCount(0);
+    }
+    return () => { dashboardActive.current = false; requestVersion.current += 1; };
+  }, [isAuthenticated, adminKey, loadDashboard]);
 
   const refresh = useCallback(() => loadDashboard(adminKey), [adminKey, loadDashboard]);
   const syncState = useAdminRealtime(isAuthenticated, refresh);
@@ -131,19 +150,9 @@ export default function AdminPage() {
     event.preventDefault(); if (isSigningIn) return;
     setAuthError(""); setIsSigningIn(true);
     const schoolKey = String(new FormData(event.currentTarget).get("schoolKey") ?? "").trim();
-    const { data: isValid, error } = await supabase.rpc("verify_school_admin_key", { p_admin_key: schoolKey });
+    const error = await authenticate(schoolKey);
     setIsSigningIn(false);
-    if (error) { setAuthError("인증 서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요."); return; }
-    if (!isValid) { setAuthError("관리자 인증키를 확인해 주세요."); return; }
-    setTestEnabled(false); setAdminKey(schoolKey); setIsAuthenticated(true); await loadDashboard(schoolKey, true);
-  }
-
-  function signOut() {
-    requestVersion.current += 1;
-    setIsAuthenticated(false); setTestEnabled(false); setAdminKey(""); setSurveys([]); setAuthError(""); setSettingsNotice(""); setErrorMessage(""); setDraftLayout(null);
-    setDeletedSurveys([]); setDeleteTarget(null); schoolDraftDirty.current = false;
-    setManualAssignments([]);setSelectedStudentId(null);setDraggingStudentId(null);setUndoPlacement(null);setPlacementMessage("");
-    previousAssignments.current = new Map(); setMovedCount(0);
+    if (error) setAuthError(error);
   }
 
   async function createTestStudents() {
@@ -245,17 +254,19 @@ export default function AdminPage() {
     previousAssignments.current = next;
   }, [allocation.rooms]);
 
+  if (status === "restoring") return <main className="admin-login-page"><section className="admin-login-card"><h1>관리자 인증</h1>{restoreError ? <><p role="alert">{restoreError}</p><button type="button" onClick={retryRestore}>다시 확인</button></> : <p role="status">인증 상태를 확인하는 중입니다...</p>}</section></main>;
+
   if (!isAuthenticated) return <main className="admin-login-page"><form className="admin-login-card" onSubmit={signIn}>
     <h1>관리자 인증</h1>
 
-    <label><span>관리자 인증키</span><input type="password" name="schoolKey" autoComplete="off" placeholder="인증키를 입력하세요" required /></label>
-    {authError && <p className="login-error" role="alert">{authError}</p>}<button type="submit" disabled={isSigningIn}>{isSigningIn ? "확인 중..." : "인증하기"}</button>
+    <label><span>관리자 인증키 (12345)</span><input type="password" name="schoolKey" autoComplete="off" placeholder="인증키를 입력하세요" required /></label>
+    {(authError || restoreError) && <p className="login-error" role="alert">{authError || restoreError}</p>}<button type="submit" disabled={isSigningIn}>{isSigningIn ? "확인 중..." : "인증하기"}</button>
     <Link className="help-link" href="/help#admin">관리자 도움말</Link>
   </form></main>;
 
   return <main className="subpage">
 
-    <div className="admin-title-row"><div><h1>기숙사 배정 지도</h1><div className="admin-sync-meta"><span className={"sync-state " + syncState} role="status" aria-label="동기화 상태"><i />{syncState === "connected" ? "실시간 연결됨" : syncState === "connecting" ? "실시간 연결 중" : "연결 복구 중"}</span><small>{updatedAt ? "최근 반영 " + updatedAt : "데이터 확인 중"}{movedCount > 0 ? " · " + movedCount + "명 배정 변경" : ""}</small></div></div><div className="admin-actions"><Link className="help-link" href="/help#admin">도움말</Link><button className="secondary-button" onClick={signOut} disabled={!!changingSurveyId}>로그아웃</button><button onClick={() => void loadDashboard(adminKey, true)} disabled={isLoading}>{isLoading ? "불러오는 중..." : "DB 새로고침"}</button><span className="admin-action-feedback" role="status">{settingsNotice}</span></div></div>
+    <div className="admin-title-row"><div><h1>기숙사 배정 지도</h1><div className="admin-sync-meta"><span className={"sync-state " + syncState} role="status" aria-label="동기화 상태"><i />{syncState === "connected" ? "실시간 연결됨" : syncState === "connecting" ? "실시간 연결 중" : "연결 복구 중"}</span><small>{updatedAt ? "최근 반영 " + updatedAt : "데이터 확인 중"}{movedCount > 0 ? " · " + movedCount + "명 배정 변경" : ""}</small></div></div><div className="admin-actions"><Link className="help-link" href="/help#admin">도움말</Link><button onClick={() => void loadDashboard(adminKey, true)} disabled={isLoading}>{isLoading ? "불러오는 중..." : "DB 새로고침"}</button><span className="admin-action-feedback" role="status">{settingsNotice}</span></div></div>
     {errorMessage && <p className="notice error" role="alert">{errorMessage}</p>}
 
     <details className="admin-settings-panel"><summary>명단·건물 설정<span>{testEnabled ? "테스트 모드" : "실제 운영"}</span></summary><div className="admin-settings-body"><section className="capacity-panel" aria-labelledby="capacity-title"><div><h2 id="capacity-title">학교 명단과 기본 인실</h2></div>

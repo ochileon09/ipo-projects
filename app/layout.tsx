@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { SiteShell } from "@/components/site-nav";
+import { AdminSessionProvider } from "@/components/admin-session";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -15,7 +16,7 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: `(function(){try{var saved=localStorage.getItem('roomfit-theme');document.documentElement.dataset.theme=saved||'dark';}catch(e){document.documentElement.dataset.theme='dark';}})();` }} />
       </head>
-      <body><SiteShell>{children}</SiteShell></body>
+      <body><AdminSessionProvider><SiteShell>{children}</SiteShell></AdminSessionProvider></body>
     </html>
   );
 }

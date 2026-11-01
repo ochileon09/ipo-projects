@@ -1,0 +1,32 @@
+begin;
+do $$
+declare p jsonb:='{"student_id":"1930","student_name":"__검토정리검증__","wake_time":"07:30","sleep_time":"00:30","shower_time":"07:40","tidiness":3,"noise_sensitivity":3,"preferred_temperature":22,"light_sensitivity":3,"ventilation_preference":3,"alarm_sensitivity":3,"avoidance_requests":[{"student_id":"1929","student_name":"검증상대","reason":"검증용 사유"}]}'; sid uuid;r uuid;before_time timestamptz;
+begin
+ if exists(select 1 from public.student_surveys where student_name='__검토정리검증__') then raise exception '검증 이름 충돌';end if;
+ select survey_id into sid from public.submit_student_survey(p);
+ if (select shower_duration_minutes<>15 or cardinality(auto_filled_fields)<>4 from public.student_surveys where id=sid) then raise exception '기본값 보완 실패';end if;
+ select updated_at into before_time from public.student_surveys where id=sid;
+ update public.student_surveys set environment_answers=environment_answers where id=sid;
+ if (select updated_at<>before_time from public.student_surveys where id=sid) then raise exception '원래 제출시각 변경';end if;
+ select id into r from public.room_separation_requests where survey_id=sid;
+ begin perform public.review_room_separation('wrong',r,true);raise exception '인증 우회';exception when sqlstate '28000' then null;end;
+ perform public.review_room_separation('12345',r,true);
+ if exists(select 1 from public.room_separation_requests where id=r) then raise exception '승인 신청이 남음';end if;
+ if not exists(select 1 from public.room_separation_decisions where survey_id=sid and status='approved' and active) then raise exception '분리 조건 손실';end if;
+ perform public.submit_student_survey(p);
+ if exists(select 1 from public.room_separation_requests where survey_id=sid and status='pending') then raise exception '같은 사유 재검토 생성';end if;
+ perform public.submit_student_survey(jsonb_set(p,'{avoidance_requests,0,reason}','"변경 사유"'));
+ if exists(select 1 from public.room_separation_decisions where survey_id=sid and active) then raise exception '변경 사유에 기존 승인 유지';end if;
+ select id into r from public.room_separation_requests where survey_id=sid and status='pending';
+ if r is null then raise exception '변경 사유 검토 요청 누락';end if;
+ perform public.review_room_separation('12345',r,false);
+ if exists(select 1 from public.room_separation_requests where id=r) then raise exception '기각 신청이 남음';end if;
+ if not exists(select 1 from public.room_separation_decisions where survey_id=sid and status='rejected' and active) then raise exception '기각 결정 누락';end if;
+ perform public.submit_student_survey((p-'avoidance_requests')||'{"shower_duration_minutes":20,"environment_answers":{"version":1,"humidity":2,"summer_ac":3,"winter_heater":1}}'::jsonb);
+ if (select cardinality(auto_filled_fields)<>0 or shower_duration_minutes<>20 from public.student_surveys where id=sid) then raise exception '실제 답변으로 기본값 대체 실패';end if;
+ perform public.submit_student_survey(p-'avoidance_requests');
+ if (select shower_duration_minutes<>20 from public.student_surveys where id=sid) then raise exception '이전 앱이 실제 소요시간 덮어씀';end if;
+ if has_table_privilege('anon','public.room_separation_decisions','SELECT') then raise exception '결정 비공개 실패';end if;
+end;$$;
+rollback;
+select 'PASS: queue removal, decision retention, changed reason, default provenance, legacy preservation, privacy; fixtures rolled back' as result;

@@ -21,6 +21,7 @@ export type MatchingStudent = {
   flexible_preferences?: ("tidiness" | "ventilation" | "temperature")[];
   environment_answers?: { version?: number; humidity?: number; summer_ac?: number; winter_heater?: number };
   avoid_with?: string[];
+  auto_filled_fields?: string[];
 };
 
 function timeToMinutes(value: string) {

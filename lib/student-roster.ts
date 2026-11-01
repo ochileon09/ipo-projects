@@ -32,3 +32,12 @@ export function selectRoster(surveys: SurveyRow[], classCount: number, studentsP
   const allStudents = createDefaultRoster(classCount, studentsPerClass).map(student => selected.get(student.student_id) ?? student);
   return { allStudents, activeStudents: allStudents.filter(student => includeDefaults || !student.is_default), outsideRoster, receivedStudents };
 }
+
+export function conflictingStudentIds(students: SurveyRow[]) {
+  const names = new Map<string, Set<string>>();
+  students.filter(student=>!student.is_test&&!student.is_default).forEach(student=>{
+    const id=student.student_id.trim();const values=names.get(id)??new Set<string>();
+    values.add(student.student_name.trim());names.set(id,values);
+  });
+  return new Set([...names].filter(([,values])=>values.size>1).map(([id])=>id));
+}

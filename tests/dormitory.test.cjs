@@ -339,3 +339,9 @@ test('only approved matching identities activate separation in the shared dashbo
  assert.deepEqual(approved.roster.activeStudents[0].avoid_with,['2102']);
  assert(buildDormitoryView({...input,avoidanceRequests:[{...request,status:'approved',target_student_name:'동명이인 아님'}]}).allocation.rooms.some(room=>room.students.length===2));
 });
+
+test('same ID with different trimmed names is flagged, while identical names and virtual roster entries are not',()=>{
+ const {conflictingStudentIds}=require('../.codex_tmp/matching-tests/student-roster.js');
+ const rows=[student('2101',{student_name:'학생 A'}),student('2101',{student_name:'학생 B'}),student('2102',{student_name:'학생 C'}),student('2102',{student_name:' 학생 C '}),student('2102',{student_name:'테스트',is_test:true})];
+ assert.deepEqual([...conflictingStudentIds(rows)],['2101']);
+});

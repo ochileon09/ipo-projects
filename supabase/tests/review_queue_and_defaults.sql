@@ -3,6 +3,8 @@ do $$
 declare p jsonb:='{"student_id":"1930","student_name":"__검토정리검증__","wake_time":"07:30","sleep_time":"00:30","shower_time":"07:40","tidiness":3,"noise_sensitivity":3,"preferred_temperature":22,"light_sensitivity":3,"ventilation_preference":3,"alarm_sensitivity":3,"avoidance_requests":[{"student_id":"1929","student_name":"검증상대","reason":"검증용 사유"}]}'; sid uuid;r uuid;before_time timestamptz;
 begin
  if exists(select 1 from public.student_surveys where student_name='__검토정리검증__') then raise exception '검증 이름 충돌';end if;
+ update public.dormitory_settings set class_count=9,students_per_class=30 where id=true;
+ perform public.submit_student_survey(p||'{"student_id":"1929","student_name":"검증상대","avoidance_requests":[]}'::jsonb);
  select survey_id into sid from public.submit_student_survey(p);
  if (select shower_duration_minutes<>15 or cardinality(auto_filled_fields)<>4 from public.student_surveys where id=sid) then raise exception '기본값 보완 실패';end if;
  select updated_at into before_time from public.student_surveys where id=sid;

@@ -1,0 +1,35 @@
+begin;
+do $$
+declare p jsonb:='{"student_id":"1930","student_name":"__대상검증__","wake_time":"07:30","sleep_time":"00:30","shower_time":"07:40","tidiness":3,"noise_sensitivity":3,"preferred_temperature":22,"light_sensitivity":3,"ventilation_preference":3,"alarm_sensitivity":3,"avoidance_requests":[{"student_id":"1929","student_name":"__상대검증__","reason":"검증 사유"}]}'; sid uuid;target_id uuid;duplicate_id uuid;r uuid;next_r uuid;v boolean;
+begin
+ if exists(select 1 from public.student_surveys where student_name in ('__대상검증__','__상대검증__')) then raise exception '검증 이름 충돌';end if;
+ update public.dormitory_settings set class_count=9,students_per_class=30 where id=true;
+ select survey_id into sid from public.submit_student_survey(p);
+ select id into r from public.room_separation_requests where survey_id=sid and status='pending';
+ begin perform public.review_room_separation('12345',r,true);raise exception '미응답 상대 승인 허용';exception when sqlstate '22023' then null;end;
+ if not exists(select 1 from public.room_separation_requests where id=r and status='pending') then raise exception '검사 실패로 신청 손실';end if;
+ select survey_id into target_id from public.submit_student_survey(p||'{"student_id":"1929","student_name":"__상대검증__","avoidance_requests":[]}'::jsonb);
+ update public.student_surveys set student_name='오타 이름' where id=target_id;
+ begin perform public.review_room_separation('12345',r,true);raise exception '이름 불일치 승인';exception when sqlstate '22023' then null;end;
+ update public.student_surveys set student_name='__상대검증__' where id=target_id;
+ select survey_id into duplicate_id from public.submit_student_survey(p||'{"student_id":"1929","student_name":"__충돌검증__","avoidance_requests":[]}'::jsonb);
+ begin perform public.review_room_separation('12345',r,true);raise exception '중복 학번 승인';exception when sqlstate '22023' then null;end;
+ update public.student_surveys set deleted_at=clock_timestamp() where id=duplicate_id;
+ perform public.review_room_separation('12345',r,true);
+ if exists(select 1 from public.room_separation_requests where id=r) then raise exception '처리된 신청 남음';end if;
+ if not exists(select 1 from jsonb_array_elements(public.get_dormitory_dashboard_by_key('12345')->'separation_conditions') x where x->>'id'=r::text and (x->>'active')::boolean) then raise exception '조건 목록 누락';end if;
+ begin perform public.set_room_separation_condition_by_key('wrong',r,false);raise exception '인증 우회';exception when sqlstate '28000' then null;end;
+ v:=public.set_room_separation_condition_by_key('12345',r,false);if not v then raise exception '해제 실패';end if;
+ if exists(select 1 from jsonb_array_elements(public.get_dormitory_dashboard_by_key('12345')->'avoidance_requests') x where x->>'id'=r::text) then raise exception '해제한 조건 배정에 포함';end if;
+ perform public.set_room_separation_condition_by_key('12345',r,true);
+ perform public.submit_student_survey(jsonb_set(p,'{avoidance_requests,0,reason}','"새 사유"'));
+ begin perform public.set_room_separation_condition_by_key('12345',r,true);raise exception '새 사유 검토 우회';exception when sqlstate '22023' then null;end;
+ select id into next_r from public.room_separation_requests where survey_id=sid and status='pending';
+ perform public.review_room_separation('12345',next_r,true); r:=next_r;
+ update public.student_surveys set deleted_at=clock_timestamp() where id=target_id;
+ perform public.set_room_separation_condition_by_key('12345',r,false);
+ begin perform public.set_room_separation_condition_by_key('12345',r,true);raise exception '삭제된 상대에 재적용';exception when sqlstate '22023' then null;end;
+ if has_function_privilege('anon','public.separation_pair_issue(uuid,text,text)','EXECUTE') then raise exception '비공개 확인 함수 노출';end if;
+end;$$;
+rollback;
+select 'PASS: target validation, condition readback, disable/reapply, invalid key, stale target and privacy; all fixtures rolled back' as result;

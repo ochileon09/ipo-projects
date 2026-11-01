@@ -345,3 +345,21 @@ test('same ID with different trimmed names is flagged, while identical names and
  const rows=[student('2101',{student_name:'학생 A'}),student('2101',{student_name:'학생 B'}),student('2102',{student_name:'학생 C'}),student('2102',{student_name:' 학생 C '}),student('2102',{student_name:'테스트',is_test:true})];
  assert.deepEqual([...conflictingStudentIds(rows)],['2101']);
 });
+
+test('separation approval eligibility catches unmatched, ambiguous, out-of-roster and different-grade identities',()=>{
+ const {separationEligibility,separationApplication}=require('../.codex_tmp/matching-tests/dormitory-view.js');
+ const a=student('2101'),b=student('2102');const school={classCount:6,studentsPerClass:16,roomCapacity:2};
+ const r={id:'r',survey_id:a.id,requester_id:a.student_id,requester_name:a.student_name,target_student_id:b.student_id,target_student_name:b.student_name,reason:'',status:'approved',active:true,reviewed_at:''};
+ assert.equal(separationEligibility(r,[a,b],school),null);
+ assert.match(separationEligibility(r,[a],school),/실제 설문/);
+ assert.match(separationEligibility({...r,target_student_name:'오타'},[a,b],school),/일치/);
+ assert.match(separationEligibility(r,[a,b,{...b,id:'duplicate',student_name:'다른 이름'}],school),/다른 이름/);
+ const other=student('3101');assert.match(separationEligibility({...r,target_student_id:other.student_id,target_student_name:other.student_name},[a,other],school),/다른 학년/);
+ assert.match(separationEligibility({...r,target_student_id:'2919'},[a,b],school),/범위/);
+ const view=buildDormitoryView({surveys:[a,b],school,layout:null,manualAssignments:[],testEnabled:false,includeDefaults:false,avoidanceRequests:[r]});
+ assert.equal(separationApplication(r,[a,b],school,view.allocation.rooms).state,'applied');
+ assert.equal(separationApplication(r,[a,b],school,[]).state,'waiting');
+ assert.equal(separationApplication({...r,active:false},[a,b],school,[]).state,'inactive');
+ assert.equal(separationApplication(r,[a],school,[]).state,'warning');
+ assert.equal(separationApplication(r,[a,b],school,[{id:'same',students:[a,b]}]).state,'warning');
+});

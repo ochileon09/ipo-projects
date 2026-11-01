@@ -3,6 +3,8 @@ do $$
 declare p jsonb:='{"student_id":"1930","student_name":"__환경검증__","wake_time":"07:30","sleep_time":"00:30","shower_time":"07:40","tidiness":3,"noise_sensitivity":3,"preferred_temperature":22,"light_sensitivity":3,"ventilation_preference":3,"alarm_sensitivity":3,"environment_answers":{"version":1,"humidity":0,"summer_ac":2,"winter_heater":1},"avoidance_requests":[{"student_id":"1929","student_name":"검증상대","reason":"생활 중 반복 충돌"}]}'; r uuid; sid uuid;
 begin
  if exists(select 1 from public.student_surveys where student_name='__환경검증__') then raise exception '검증 이름 충돌';end if;
+ update public.dormitory_settings set class_count=9,students_per_class=30 where id=true;
+ perform public.submit_student_survey(p||'{"student_id":"1929","student_name":"검증상대","avoidance_requests":[]}'::jsonb);
  select survey_id into sid from public.submit_student_survey(p);
  select id into r from public.room_separation_requests where survey_id=sid;
  if r is null then raise exception '요청 저장 실패';end if;

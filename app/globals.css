@@ -640,3 +640,15 @@ button.student-bed.is-invalid-target { border-color:var(--error-text); backgroun
 .identity-warning {display:block;margin-top:4px;color:#976005;font-size:11px;font-weight:650;}
 html[data-theme="dark"] .identity-warning {color:#f3c66e;}
 .auto-fill-badge {display:block;margin-top:4px;color:var(--shell-muted);font-size:10px;}
+
+.separation-issue,.separation-state.warning {color:#986000;font-size:12px;}
+html[data-theme="dark"] .separation-issue,html[data-theme="dark"] .separation-state.warning {color:#efc471;}
+.separation-ready,.separation-state.applied {color:var(--success-text);font-size:12px;}
+.separation-state.waiting {color:var(--shell-muted);font-size:12px;}
+.separation-condition-row {display:flex;align-items:center;justify-content:space-between;gap:16px;margin:12px 20px;padding:16px;border:1px solid var(--shell-border);border-radius:9px;}
+.separation-condition-row strong {font-size:13px;}
+.separation-condition-row p {margin:6px 0 0;font-size:12px;}
+.separation-condition-row button {flex-shrink:0;}
+.inactive-conditions {margin:16px 20px;color:var(--shell-muted);font-size:12px;}
+.inactive-conditions summary {cursor:pointer;}
+@media(max-width:600px){.separation-condition-row {align-items:flex-start;flex-direction:column;}.inactive-conditions .separation-condition-row {margin-inline:0;}}

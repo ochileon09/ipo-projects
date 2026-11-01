@@ -10,7 +10,7 @@ import { useAdminRealtime } from "@/lib/supabase/use-admin-realtime";
 import { StudentBed, StudentPlacementProvider } from "@/components/student-bed";
 import { validateLayout, planManualMove, type AssignedRoom, type BedAddress, type ManualAssignment, type DormLayout, type FloorLayout } from "@/lib/dormitory-layout";
 import { conflictingStudentIds, isSchoolStudentId, type SurveyRow } from "@/lib/student-roster";
-import { buildDormitoryView, type SchoolSettings, type SeparationRequest } from "@/lib/dormitory-view";
+import { separationEligibility, separationApplication, type SeparationCondition, buildDormitoryView, type SchoolSettings, type SeparationRequest } from "@/lib/dormitory-view";
 import { hasDetailedHabits } from "@/lib/roommate-matching";
 import { useAdminSession } from "@/components/admin-session";
 
@@ -38,6 +38,8 @@ export default function AdminPage() {
   const [authError, setAuthError] = useState("");
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [avoidanceRequests, setAvoidanceRequests] = useState<SeparationRequest[]>([]);
+  const [separationConditions,setSeparationConditions] = useState<SeparationCondition[]>([]);
+  const [conditionBusy,setConditionBusy] = useState(false);
   const [reviewBusy,setReviewBusy] = useState(false);
   const [surveys, setSurveys] = useState<SurveyRow[]>([]);
   const [deletedSurveys, setDeletedSurveys] = useState<DeletedSurvey[]>([]);
@@ -82,6 +84,7 @@ export default function AdminPage() {
       setErrorMessage("");
       const next = ((data?.surveys ?? []) as Omit<SurveyRow, "is_default">[]).map(survey => ({ ...survey, is_default: false }));
       setAvoidanceRequests(data?.avoidance_requests ?? []);
+      setSeparationConditions(data?.separation_conditions ?? []);
       setSurveys(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next);
       const nextDeleted = (data?.deleted_surveys ?? []) as DeletedSurvey[];
       setDeletedSurveys(previous => JSON.stringify(previous) === JSON.stringify(nextDeleted) ? previous : nextDeleted);
@@ -113,7 +116,7 @@ export default function AdminPage() {
       void loadDashboard(adminKey, true);
     } else {
       requestVersion.current += 1;
-      setTestEnabled(false); setSurveys([]); setAvoidanceRequests([]); setDeletedSurveys([]); setDeleteTarget(null);
+      setTestEnabled(false); setSurveys([]); setAvoidanceRequests([]); setSeparationConditions([]); setDeletedSurveys([]); setDeleteTarget(null);
       setSettingsNotice(""); setErrorMessage(""); setDraftLayout(null); setSavedLayout(null);
       setManualAssignments([]); setSelectedStudentId(null); setDraggingStudentId(null); setHoverBed(null);
       setUndoPlacement(null); setPlacementMessage(""); setIncludeDefaults(false); setIsLoading(true);
@@ -149,10 +152,20 @@ export default function AdminPage() {
   }
 
   async function reviewRequest(requestId:string, approve:boolean) {
-    setReviewBusy(true);
+    if(reviewBusy)return;
+    setReviewBusy(true);setErrorMessage("");
     const {error}=await supabase.rpc("review_room_separation",{p_admin_key:adminKey,p_request_id:requestId,p_approve:approve});
-    if(error)setErrorMessage(error.message);else await loadDashboard(adminKey);
+    if(error){await loadDashboard(adminKey);setErrorMessage(error.message);}else await loadDashboard(adminKey);
     setReviewBusy(false);
+  }
+
+  async function setCondition(conditionId:string, active:boolean) {
+    if(conditionBusy)return;
+    setConditionBusy(true);setErrorMessage("");
+    const {data,error}=await supabase.rpc("set_room_separation_condition_by_key",{p_admin_key:adminKey,p_condition_id:conditionId,p_active:active});
+    if(error){await loadDashboard(adminKey);setErrorMessage(error.message);}
+    else {await loadDashboard(adminKey);setSettingsNotice(data?(active?"분리 조건을 다시 적용했습니다.":"분리 조건을 해제했습니다."):"다른 화면에서 변경된 조건입니다.");}
+    setConditionBusy(false);
   }
 
   async function signIn(event: FormEvent<HTMLFormElement>) {
@@ -306,8 +319,14 @@ export default function AdminPage() {
 
     <section className="admin-board separation-review"><div className="board-heading"><h2>분리 배정 요청 검토</h2><span>{avoidanceRequests.filter(request=>request.status==="pending").length}건 대기</span></div>
       <p className="avoidance-help">사유를 검토해 O(승인) 또는 X(기각)를 선택하세요. 승인 전에는 배정에 반영되지 않습니다. 처리 후 신청과 사유는 삭제되며, 승인된 분리 조건만 유지됩니다.</p>
-      {pendingRequests.map(request=><article className="separation-review-row" key={request.id}><strong>{request.requester_id} {request.requester_name} → {request.target_student_id} {request.target_student_name}</strong><p>{request.reason}</p><div><span>{request.status==="approved"?"승인됨":request.status==="rejected"?"기각됨":"검토 대기"}</span><button type="button" aria-label={`${request.requester_id} 요청 승인`} aria-pressed={request.status==="approved"} disabled={reviewBusy} onClick={()=>void reviewRequest(request.id,true)}>O 승인</button><button type="button" className="secondary-button" aria-label={`${request.requester_id} 요청 기각`} aria-pressed={request.status==="rejected"} disabled={reviewBusy} onClick={()=>void reviewRequest(request.id,false)}>X 기각</button></div></article>)}
+      {pendingRequests.map(request=>{const issue=separationEligibility(request,surveys,school);return <article className="separation-review-row" key={request.id}><strong>{request.requester_id} {request.requester_name} → {request.target_student_id} {request.target_student_name}</strong><p>{request.reason}</p>{issue?<p className="separation-issue" role="status">대상 확인 필요: {issue}</p>:<p className="separation-ready">학번·이름·학년 확인됨</p>}<div><span>{request.status==="approved"?"승인됨":request.status==="rejected"?"기각됨":"검토 대기"}</span><button type="button" aria-label={`${request.requester_id} 요청 승인`} aria-pressed={request.status==="approved"} disabled={reviewBusy||!!issue} title={issue??"대상 정보가 확인된 요청입니다."} onClick={()=>void reviewRequest(request.id,true)}>O 승인</button><button type="button" className="secondary-button" aria-label={`${request.requester_id} 요청 기각`} aria-pressed={request.status==="rejected"} disabled={reviewBusy} onClick={()=>void reviewRequest(request.id,false)}>X 기각</button></div></article>})}
       {!pendingRequests.length && <p className="avoidance-help">접수된 요청이 없습니다.</p>}
+    </section>
+    <section className="admin-board separation-conditions" aria-label="승인된 분리 조건 관리"><div className="board-heading"><h2>승인된 분리 조건</h2><span>{separationConditions.filter(condition=>condition.active).length}건 유지</span></div>
+      <p className="avoidance-help">처리된 신청·사유와 별도로 배정 조건만 관리합니다. 대상이 없거나 배정 대기 중이면 적용 상태를 확인하세요. 잘못 승인한 조건은 해제할 수 있습니다.</p>
+      {separationConditions.filter(condition=>condition.active).map(condition=>{const assessment=separationApplication(condition,surveys,school,allocation.rooms);return <article className="separation-condition-row" key={condition.id}><div><strong>{condition.requester_id} {condition.requester_name} ↔ {condition.target_student_id} {condition.target_student_name}</strong><p className={"separation-state "+assessment.state}>{assessment.label}</p>{assessment.detail&&<p className="separation-issue">{assessment.detail}</p>}</div><button type="button" className="secondary-button" disabled={conditionBusy} onClick={()=>void setCondition(condition.id,false)}>조건 해제</button></article>;})}
+      {!separationConditions.some(condition=>condition.active)&&<p className="avoidance-help">유지 중인 분리 조건이 없습니다.</p>}
+      <details className="inactive-conditions"><summary>해제된 조건 {separationConditions.filter(condition=>!condition.active).length}건</summary>{separationConditions.filter(condition=>!condition.active).map(condition=>{const issue=pendingRequests.some(request=>request.survey_id===condition.survey_id&&request.target_student_id===condition.target_student_id&&request.target_student_name===condition.target_student_name)?"새 요청에서 사유를 검토한 뒤 승인해 주세요.":separationEligibility(condition,surveys,school);return <article className="separation-condition-row" key={condition.id}><div><strong>{condition.requester_id} {condition.requester_name} ↔ {condition.target_student_id} {condition.target_student_name}</strong><p>{issue??"대상 확인됨 · 필요하면 재적용할 수 있습니다."}</p></div><button type="button" className="secondary-button" disabled={conditionBusy||!!issue} onClick={()=>void setCondition(condition.id,true)}>재적용</button></article>;})}</details>
     </section>
     <details className="deleted-survey-history"><summary>삭제된 설문 <span>{deletedSurveys.length}건</span></summary><div className="table-wrap"><table className="survey-table"><thead><tr><th>학번</th><th>이름</th><th>삭제 시각</th><th>관리</th></tr></thead><tbody>{deletedSurveys.map(student => <tr key={student.id}><td>{student.student_id}</td><td>{student.student_name}</td><td>{new Date(student.deleted_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", hour12: false })}</td><td><button type="button" className="secondary-button survey-row-restore" aria-label={`${student.student_id} ${student.student_name} 설문 복구`} disabled={!!changingSurveyId} onClick={() => void changeSurvey(student.id, true)}>{changingSurveyId === student.id ? "복구 중..." : "복구"}</button></td></tr>)}{deletedSurveys.length === 0 && <tr><td colSpan={4}><div className="empty-table">삭제된 설문이 없습니다</div></td></tr>}</tbody></table></div></details>
     {deleteTarget && <SurveyDeleteDialog student={deleteTarget} busy={changingSurveyId === deleteTarget.id} error={errorMessage} onCancel={() => setDeleteTarget(null)} onDelete={() => void changeSurvey(deleteTarget.id, false)} />}

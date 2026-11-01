@@ -8,7 +8,7 @@ import { supabase } from "@/lib/supabase/client";
 import { useAdminRealtime } from "@/lib/supabase/use-admin-realtime";
 import { buildDormitoryView, type SeparationRequest } from "@/lib/dormitory-view";
 import { gridFromLegacyFloor, type DormLayout, type ManualAssignment } from "@/lib/dormitory-layout";
-import { spaceNames, spaceSymbols } from "@/lib/floor-grid";
+import { spaceNames } from "@/lib/floor-grid";
 import type { SurveyRow } from "@/lib/student-roster";
 import { hasDetailedHabits } from "@/lib/roommate-matching";
 
@@ -26,8 +26,7 @@ export function DormitoryOverview() {
   const [error, setError] = useState("");
   const [updatedAt, setUpdatedAt] = useState("");
   const [buildingId, setBuildingId] = useState("");
-  const [floorId, setFloorId] = useState("");
-  const [roomId, setRoomId] = useState("");
+  const [selectedRooms, setSelectedRooms] = useState<Record<string,string>>({});
   const requestVersion = useRef(0);
   const activeKey = useRef("");
   activeKey.current = isAuthenticated ? adminKey : "public";
@@ -85,16 +84,8 @@ export function DormitoryOverview() {
   const building = buildings.find(item => item.id === buildingId)
     ?? buildings.find(item => rooms.some(room => room.id.startsWith(item.id + "/") && room.students.length > 0))
     ?? buildings[0];
-  const floors = [...(building?.floors ?? [])].sort((a, b) => a.floor - b.floor);
-  const floor = floors.find(item => item.id === floorId)
-    ?? floors.find(item => rooms.some(room => room.id.startsWith(`${building.id}/${item.id}/`) && room.students.length > 0))
-    ?? floors[0];
-  const floorRooms = floor ? rooms.filter(room => room.id.startsWith(`${building.id}/${floor.id}/`)) : [];
-  const selectedRoom = floorRooms.find(room => room.id === roomId) ?? floorRooms.find(room => room.students.length > 0) ?? floorRooms[0];
-  const roomsById = new Map(floorRooms.map(room => [room.id, room]));
-  const grid = floor ? gridFromLegacyFloor(floor) : null;
-  const floorAssigned = floorRooms.reduce((sum, room) => sum + room.students.length, 0);
-  const floorCapacity = floorRooms.reduce((sum, room) => sum + room.capacity, 0);
+  const floors = [...(building?.floors ?? [])].sort((a, b) => b.floor - a.floor);
+  const buildingRooms = building ? rooms.filter(room=>room.id.startsWith(building.id+"/")) : [];
 
   return <section className="overview" aria-labelledby="overview-title">
     <div className="overview-title"><div><h2 id="overview-title">현재 방 배치</h2><span className="overview-sync" role="status" aria-label="대시보드 동기화 상태">{error ? "연결 확인 필요" : syncState === "connected" ? "실시간 연결됨" : syncState === "connecting" ? "연결 중" : "연결 복구 중"}{updatedAt && ` · ${updatedAt}`}</span></div><div className="overview-controls"><span className="overview-mode">{testEnabled ? "테스트 포함" : "실제 운영"}{current?.management.include_defaults ? " · 미응답 포함" : ""}</span><button type="button" className="secondary-button" disabled={loading} onClick={() => void refresh()}>{loading ? "불러오는 중" : "새로고침"}</button></div></div>
@@ -107,17 +98,19 @@ export function DormitoryOverview() {
         <article><span>대기·확인 필요</span><strong>{view.waitingCount}<small>명</small></strong><p>자리·명단·분리 조건 확인</p></article>
       </div>
       <div className="overview-map-panel">
-        <div className="overview-map-toolbar"><div className="overview-filters"><label><span>건물</span><select value={building?.id ?? ""} onChange={event => { setBuildingId(event.target.value); setFloorId(""); setRoomId(""); }}>{buildings.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label><span>층</span><select value={floor?.id ?? ""} onChange={event => { setBuildingId(building.id); setFloorId(event.target.value); setRoomId(""); }}>{floors.map(item => <option key={item.id} value={item.id}>{item.floor}층</option>)}</select></label></div><p>{floorRooms.length}개 방 · {floorAssigned}/{floorCapacity}명</p><Link className="help-link" href="/admin">배정 조정 <Icon name="arrow" size={15} /></Link></div>
-        {grid && building && floor && <div className="overview-plan-scroll"><div className="overview-plan" role="group" aria-label={`${building.name} ${floor.floor}층 방 배치`} style={{ gridTemplateColumns: `repeat(${grid.cols}, minmax(58px, 1fr))`, minWidth: grid.cols * 64 - 6 }}>
-          {grid.spaces.map(space => {
-            const room = roomsById.get(`${building.id}/${floor.id}/${space.id}`);
-            const position = { gridColumn: `${space.col + 1} / span ${space.colSpan}`, gridRow: `${space.row + 1} / span ${space.rowSpan}` };
-            return room ? <button key={space.id} type="button" style={position} className={`overview-room${room.students.length ? " occupied" : ""}`} aria-pressed={selectedRoom?.id === room.id} aria-label={`${room.number}호 · ${room.grade}학년 · ${room.students.length}/${room.capacity}명`} onClick={() => { setBuildingId(building.id); setFloorId(floor.id); setRoomId(room.id); }}><strong>{room.number}</strong><span>{room.students.length}/{room.capacity}명</span></button>
-              : <div key={space.id} style={position} className={`overview-space kind-${space.kind}`} aria-label={spaceNames[space.kind]}>{space.kind !== "outside" && space.kind !== "corridor" && <><span aria-hidden="true">{spaceSymbols[space.kind]}</span><small>{spaceNames[space.kind]}</small></>}</div>;
-          })}
-        </div></div>}
-        <div className="overview-map-caption"><span><i />배정된 방 <i />빈방</span><small>호실을 선택하면 입실 학생을 확인할 수 있습니다.</small></div>
-        {selectedRoom ? <section className="overview-room-detail" aria-label="선택한 호실"><div className="overview-room-detail-title"><h3>{building.name} {selectedRoom.number}호</h3><span>{selectedRoom.grade}학년 · {selectedRoom.capacity}인실</span><span className="overview-score">{selectedRoom.score === null ? "평가 대기" : `${selectedRoom.students.some(student => student.is_default || !hasDetailedHabits(student)) ? "임시 적합도" : "적합도"} ${selectedRoom.score.toFixed(1)} / 10`}</span></div><ol>{selectedRoom.beds.map((student, index) => <li key={index}><span className="overview-bed-number">{index + 1}</span>{student ? <div><strong>{student.student_name}</strong><small>{student.student_id}{student.is_test ? " · 테스트" : student.is_default ? " · 미응답" : ""}</small></div> : <span className="overview-empty-bed">빈자리</span>}</li>)}</ol></section> : <p className="overview-loading">이 층에는 배정 가능한 호실이 없습니다.</p>}
+        <div className="overview-map-toolbar"><div className="overview-filters"><label><span>건물</span><select value={building?.id ?? ""} onChange={event=>{setBuildingId(event.target.value);setSelectedRooms({});}}>{buildings.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div><p>{floors.length}개 층 · {buildingRooms.length}개 방 · {buildingRooms.reduce((sum,room)=>sum+room.students.length,0)}/{buildingRooms.reduce((sum,room)=>sum+room.capacity,0)}명</p><Link className="help-link" href="/admin">배정 조정 <Icon name="arrow" size={15}/></Link></div>
+        <div className="overview-map-caption overview-building-caption"><span><i/>배정된 방 <i/>빈방</span><small>호실을 누르면 입실 정보를 펼칩니다.</small></div>
+        {floors.map(floor=>{
+          const floorRooms=buildingRooms.filter(room=>room.id.startsWith(`${building.id}/${floor.id}/`));
+          const grid=gridFromLegacyFloor(floor);
+          const spaces=new Map(grid.spaces.map(space=>[`${building.id}/${floor.id}/${space.id}`,space]));
+          const wings=[floorRooms.filter(room=>(spaces.get(room.id)?.col??0)<grid.cols/2),floorRooms.filter(room=>(spaces.get(room.id)?.col??0)>=grid.cols/2)];
+          const facilities=Array.from(new Set(grid.spaces.filter(space=>space.kind!=="room"&&space.kind!=="outside"&&space.kind!=="corridor").map(space=>spaceNames[space.kind])));
+          return <section key={floor.id} className="overview-floor" aria-label={`${building.name} ${floor.floor}층 전체 호실`}>
+            <header><h3>{floor.floor}층</h3><span>{floorRooms.length}개 방 · {floorRooms.reduce((sum,room)=>sum+room.students.length,0)}/{floorRooms.reduce((sum,room)=>sum+room.capacity,0)}명</span><small>{facilities.join(" · ")}</small></header>
+            <div className="overview-room-columns">{wings.map((wing,index)=><div className="overview-room-column" key={index}><h4>{index===0?"왼쪽 구역":"오른쪽 구역"}</h4>{wing.map(room=><div key={room.id} className="overview-room-item"><button type="button" className={`overview-room${room.students.length?" occupied":""}`} aria-expanded={selectedRooms[floor.id]===room.id} aria-controls={`detail-${room.id}`} aria-label={`${room.number}호 · ${room.grade}학년 · ${room.students.length}/${room.capacity}명`} onClick={()=>setSelectedRooms(previous=>({...previous,[floor.id]:previous[floor.id]===room.id?"":room.id}))}><strong>{room.number}호</strong><span>{room.grade}학년</span><span>{room.students.length}/{room.capacity}명</span><span aria-hidden="true">{selectedRooms[floor.id]===room.id?"−":"＋"}</span></button>{selectedRooms[floor.id]===room.id&&<div id={`detail-${room.id}`}><section className="overview-room-detail" aria-label={`${room.number}호 입실 정보`}><div className="overview-room-detail-title"><h3>{building.name} {room.number}호</h3><span>{room.grade}학년 · {room.capacity}인실</span><span className="overview-score">{room.score === null ? "평가 대기" : `${room.students.some(student => student.is_default || !hasDetailedHabits(student)) ? "임시 적합도" : "적합도"} ${room.score.toFixed(1)} / 10`}</span></div><ol>{room.beds.map((student, index) => <li key={index}><span className="overview-bed-number">{index + 1}</span>{student ? <div><strong>{student.student_name}</strong><small>{student.student_id}{student.is_test ? " · 테스트" : student.is_default ? " · 미응답" : ""}</small></div> : <span className="overview-empty-bed">빈자리</span>}</li>)}</ol></section></div>}</div>)}{!wing.length&&<p className="overview-column-empty">호실 없음</p>}</div>)}</div>
+          </section>;
+        })}
       </div>
       <p className="overview-footnote">새 설문이 접수되면 자동 배정은 달라질 수 있습니다. 수동으로 고정한 자리는 유지됩니다.</p>
     </>}

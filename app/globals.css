@@ -613,3 +613,34 @@ button.student-bed.is-invalid-target { border-color:var(--error-text); backgroun
 .separation-review-row p {white-space:pre-wrap;overflow-wrap:anywhere;}
 .separation-review-row > div {display:flex;gap:12px;align-items:center;flex-wrap:wrap;}
 .separation-review-row button[aria-pressed="true"] {outline:2px solid var(--shell-accent);outline-offset:2px;}
+
+.overview-building-caption {padding-top:16px;}
+.overview-floor {padding:20px;border-top:1px solid var(--shell-border);}
+.overview-floor > header {display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:14px;}
+.overview-floor h3 {margin:0;color:var(--shell-accent);font-size:21px;}
+.overview-floor header > span,.overview-floor header > small {color:var(--shell-muted);font-size:11px;}
+.overview-floor header > small {margin-left:auto;}
+.overview-room-columns {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;}
+.overview-room-column {min-width:0;}
+.overview-room-column h4 {margin:0 0 10px;color:var(--shell-muted);font-size:11px;font-weight:500;}
+.overview-room-item {margin-bottom:7px;}
+.overview-room-item > .overview-room {display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0;width:100%;min-height:50px;padding:10px 14px;border:1px solid var(--shell-border);border-radius:7px;background:var(--shell-panel-soft);color:var(--shell-muted);}
+.overview-room-item > .overview-room.occupied {background:var(--shell-accent-soft);color:var(--shell-accent);border-color:color-mix(in srgb,var(--shell-accent) 40%,var(--shell-border));}
+.overview-room-item > .overview-room[aria-expanded="true"] {border-color:var(--shell-accent);}
+.overview-room-item > .overview-room:hover {border-color:var(--shell-accent);}
+.overview-room-item .overview-room-detail {padding:14px 12px;border:1px solid var(--shell-border);border-radius:0 0 8px 8px;}
+.overview-room-item .overview-room-detail-title h3 {font-size:13px;}
+.overview-room-item .overview-room-detail-title .overview-score {margin-left:0;}
+.overview-room-item .overview-room-detail ol {grid-template-columns:1fr;}
+.overview-column-empty {color:var(--shell-muted);font-size:12px;}
+@media(max-width:600px){
+ .overview-floor {padding:16px 12px;}
+ .overview-room-columns {gap:10px;}
+ .overview-room-item > .overview-room {flex-wrap:wrap;justify-content:flex-start;gap:4px 8px;padding:10px;}
+ .overview-room-item > .overview-room strong {width:calc(100% - 20px);}
+ .overview-room-item > .overview-room span:last-child {margin-left:auto;}
+ .overview-floor header > small {width:100%;margin-left:0;}
+ .overview-room-item .overview-room-detail {padding:12px 8px;}
+ .overview-room-item .overview-room-detail li {padding:8px 6px;gap:6px;}
+ .overview-room-item .overview-bed-number {width:20px;flex-shrink:0;}
+}

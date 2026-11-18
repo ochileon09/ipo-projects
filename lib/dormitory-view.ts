@@ -1,7 +1,7 @@
 import { allocateDormitory, createDefaultLayout, type AssignedRoom, type DormLayout, type ManualAssignment } from "./dormitory-layout";
 import { applyGenderProfiles, conflictingStudentIds, isSchoolStudentId, selectRoster, type SurveyRow } from "./student-roster";
 import { verifiedGender, type GenderProfile } from "./gender";
-import { roomCompatibilityScore } from "./roommate-matching";
+import { canShareRoom, roomCompatibilityScore } from "./roommate-matching";
 
 export type SeparationRequest = { id:string; survey_id:string; requester_id:string; requester_name:string; target_student_id:string; target_student_name:string; reason:string; status:"pending"|"approved"|"rejected" };
 
@@ -89,12 +89,45 @@ export function separationEligibility(request: SeparationRequest, surveys: Surve
   return null;
 }
 
-export function waitingReason(student: SurveyRow, view: ReturnType<typeof buildDormitoryView>) {
-  if(verifiedGender(student)==="unknown")return "성별 확인 대기";
-  if(view.finalizedAt)return view.genderReviewRequired?"확정 기록의 성별 재검토 필요":"확정 이후 접수 · 배정 대기";
+export const waitingLabels = {
+  roster: "학교 명단 범위 밖", identity: "동일 학번·이름 확인 필요", gender: "성별 확인 대기",
+  finalReview: "확정 기록의 성별 재검토 필요", final: "확정 이후 접수 · 배정 대기",
+  room: "호실 성별 설정 필요", capacity: "해당 학년·성별 자리 부족", conditions: "배치·분리 조건 검토 필요",
+};
+export type WaitingCategory = keyof typeof waitingLabels;
+export function waitingCategory(student: SurveyRow, view: ReturnType<typeof buildDormitoryView>): WaitingCategory {
+  if(!view.roster.allStudents.some(member=>member.student_id===student.student_id))return "roster";
+  if(conflictingStudentIds(view.roster.receivedStudents).has(student.student_id))return "identity";
+  if(verifiedGender(student)==="unknown")return "gender";
+  if(view.finalizedAt)return view.genderReviewRequired?"finalReview":"final";
   const group=view.genderCapacity.find(item=>item.grade===student.grade&&item.gender===verifiedGender(student));
-  if(!group?.capacity&&view.allocation.rooms.some(room=>room.grade===student.grade&&room.gender==="unknown"))return "호실 성별 설정 필요";
-  return group&&group.shortage>0?"해당 학년·성별 자리 부족":"배치·분리 조건 검토 필요";
+  if(!group?.capacity&&view.allocation.rooms.some(room=>room.grade===student.grade&&room.gender==="unknown"))return "room";
+  const vacancies=view.allocation.rooms.filter(room=>room.grade===student.grade&&room.gender===verifiedGender(student)&&room.beds.includes(null));
+  if(vacancies.length&&vacancies.every(room=>room.students.some(member=>!canShareRoom(member,student))))return "conditions";
+  return group&&group.shortage>0?"capacity":"conditions";
+}
+export function waitingReason(student: SurveyRow, view: ReturnType<typeof buildDormitoryView>) {
+  return waitingLabels[waitingCategory(student,view)];
+}
+
+/** Count current candidates, plus held final occupants, with excluded receipt records shown separately. */
+export function summarizeDormitory(view: ReturnType<typeof buildDormitoryView>) {
+  const selectedIds=new Set(view.roster.allStudents.filter(student=>!student.is_default&&!student.is_test).map(student=>student.id));
+  const reviewRecords=view.roster.receivedStudents.filter(student=>!selectedIds.has(student.id));
+  const waiters=[...view.allocation.waiting,...reviewRecords].map(student=>({student,category:waitingCategory(student,view)}));
+  const targets=new Map(view.roster.activeStudents.map(student=>[student.student_id,student]));
+  view.allocation.rooms.flatMap(room=>room.students).forEach(student=>{if(!targets.has(student.student_id))targets.set(student.student_id,student);});
+  const rows=[1,2,3].flatMap(grade=>(["male","female","unknown"] as const).map(gender=>{
+    const group=view.genderCapacity.find(item=>item.grade===grade&&item.gender===gender);
+    return {grade,gender,students:[...targets.values()].filter(student=>student.grade===grade&&verifiedGender(student)===gender).length,
+      capacity:gender==="unknown"?null:group?.capacity??0,
+      assigned:view.allocation.rooms.filter(room=>room.grade===grade&&room.gender===gender).reduce((sum,room)=>sum+room.students.length,0),
+      waiting:view.allocation.waiting.filter(student=>student.grade===grade&&verifiedGender(student)===gender).length};
+  }));
+  const reasons=(Object.keys(waitingLabels) as WaitingCategory[]).map(category=>({category,label:waitingLabels[category],count:waiters.filter(item=>item.category===category).length}));
+  return {rows,waiters,reasons,totalWaiting:waiters.length,reviewCount:reviewRecords.length,
+    totalStudents:targets.size,totalCapacity:rows.reduce((sum,row)=>sum+(row.capacity??0),0),
+    totalAssigned:rows.reduce((sum,row)=>sum+row.assigned,0),targetWaiting:view.allocation.waiting.length};
 }
 export function separationApplication(condition: SeparationCondition, surveys: SurveyRow[], school: SchoolSettings, rooms: ReturnType<typeof allocateDormitory<SurveyRow>>["rooms"]) {
   if(!condition.active)return {state:"inactive",label:"해제됨"};

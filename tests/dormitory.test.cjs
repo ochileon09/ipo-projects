@@ -7,7 +7,7 @@ const { createFloorGrid, expandSelection, paintGrid, mergeGrid, splitGrid, moveG
 const { floorRooms, gridFromLegacyFloor } = require('../.codex_tmp/matching-tests/dormitory-layout.js');
 const { planManualMove } = require('../.codex_tmp/matching-tests/dormitory-layout.js');
 const { roommateCompatibility, showerOverlapMinutes, hasDetailedHabits } = require('../.codex_tmp/matching-tests/roommate-matching.js');
-const { buildDormitoryView: strictView, waitingReason } = require('../.codex_tmp/matching-tests/dormitory-view.js');
+const { buildDormitoryView: strictView, waitingReason, summarizeDormitory } = require('../.codex_tmp/matching-tests/dormitory-view.js');
 const { compatibilityBreakdown } = require('../.codex_tmp/matching-tests/roommate-matching.js');
 const { studentAssignmentResult } = require('../.codex_tmp/matching-tests/student-result.js');
 
@@ -578,4 +578,45 @@ test('verified final snapshots keep beds after ordinary edits, wait new unknown 
   const archived=structuredClone(final);delete archived.gender_policy_version;archived.rooms.forEach(r=>r.students.forEach(s=>{delete s.gender;delete s.gender_verified;}));
   const original=JSON.stringify(archived);const legacy=strictView({...input,finalAssignment:archived});
   assert.equal(legacy.assignedCount,0);assert(legacy.genderReviewRequired);assert.equal(JSON.stringify(archived),original);
+});
+
+test('admin counts split each grade by verified gender and keep unknown students out of available seats',()=>{
+  const people=[student('1101'),female('1102'),student('2101'),female('2102'),unknown('2103'),student('3101')];
+  const profiles=people.filter(s=>s.gender!=='unknown').map(s=>profile(s.student_id,s.gender));
+  const view=strictView(genderInput(people,profiles));const summary=summarizeDormitory(view);
+  assert.equal(summary.rows.length,9);assert.equal(summary.totalStudents,6);assert.equal(summary.totalAssigned,5);
+  assert.equal(summary.totalWaiting,1);assert.equal(summary.rows.reduce((n,row)=>n+row.students,0),6);
+  assert.deepEqual(summary.rows.find(row=>row.grade===2&&row.gender==='unknown'),{grade:2,gender:'unknown',students:1,capacity:null,assigned:0,waiting:1});
+  assert.equal(summary.reasons.find(reason=>reason.category==='gender').count,1);
+  assert.equal(summarizeDormitory(strictView(genderInput([]))).totalStudents,0);
+});
+
+test('waiting reasons account for excluded receipts and ambiguous IDs exactly once',()=>{
+  const people=[student('2101'),student('2101',{id:'different',student_name:'동일 학번 다른 이름'}),student('2201'),unknown('2102')];
+  const view=strictView(genderInput(people,[profile('2101','male')]));const summary=summarizeDormitory(view);
+  assert.equal(summary.totalStudents,2);assert.equal(summary.reviewCount,2);assert.equal(summary.totalWaiting,4);
+  assert.equal(summary.reasons.reduce((n,reason)=>n+reason.count,0),4);
+  assert.equal(summary.reasons.find(reason=>reason.category==='identity').count,2);
+  assert.equal(summary.reasons.find(reason=>reason.category==='roster').count,1);
+  assert.equal(summary.reasons.find(reason=>reason.category==='gender').count,1);
+  assert.equal(new Set(summary.waiters.map(item=>item.student.id)).size,4);
+});
+
+test('admin waiting groups distinguish shortage, blocked vacancies, room setup and frozen final entrants',()=>{
+  const people=['2101','2102','2103'].map(id=>student(id));const profiles=people.map(s=>profile(s.student_id,'male'));
+  const small=genderLayout(1);const shortage=strictView(genderInput(people,profiles,{layout:small}));
+  assert.equal(summarizeDormitory(shortage).reasons.find(reason=>reason.category==='capacity').count,1);
+  const unconfigured=strictView(genderInput(people,profiles,{layout:rawDefaultLayout(8,2)}));
+  assert.equal(summarizeDormitory(unconfigured).reasons.find(reason=>reason.category==='room').count,3);
+  const a=student('2101'),b=student('2102');const request={id:'r',survey_id:a.id,requester_id:a.student_id,requester_name:a.student_name,target_student_id:b.student_id,target_student_name:b.student_name,reason:'',status:'approved'};
+  const one=genderLayout();one[0].floors[0].leftRooms=1;
+  const blocked=strictView(genderInput([a,b],profiles,{layout:one,avoidanceRequests:[request]}));
+  assert.equal(summarizeDormitory(blocked).reasons.find(reason=>reason.category==='conditions').count,1);
+  const input=genderInput([a,b],profiles);const initial=strictView(input);
+  const finalAssignment={id:'summary-final',confirmed_at:'2026-11-18T01:00:00Z',source_revision:1,gender_policy_version:1,school:input.school,layout:input.layout,rooms:structuredClone(initial.allocation.rooms)};
+  const frozen=strictView({...input,surveys:[a,b,people[2],unknown('2104')],finalAssignment});
+  const summary=summarizeDormitory(frozen);
+  assert.equal(summary.reasons.find(reason=>reason.category==='final').count,1);
+  assert.equal(summary.reasons.find(reason=>reason.category==='gender').count,1);
+  assert.equal(summary.totalWaiting,2);
 });

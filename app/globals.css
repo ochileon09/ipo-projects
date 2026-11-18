@@ -689,11 +689,37 @@ html[data-theme="dark"] .separation-issue,html[data-theme="dark"] .separation-st
 .assignment-settings { border: 0; padding: 0; margin: 0; min-width: 0; }
 .assignment-settings:disabled { opacity: .7; }
 .overview-final-state, .result-entry { color: var(--shell-muted); font-size: 14px; line-height: 1.7; }
-.gender-manager, .gender-capacity { margin: 20px 0; border: 1px solid var(--shell-border); border-radius: 14px; background: var(--shell-panel); overflow: hidden; }
-.gender-manager > summary, .gender-capacity > summary { padding: 20px 24px; cursor: pointer; font-weight: 700; }
+.gender-manager { margin: 20px 0; border: 1px solid var(--shell-border); border-radius: 14px; background: var(--shell-panel); overflow: hidden; }
+.gender-manager > summary { padding: 20px 24px; cursor: pointer; font-weight: 700; }
 .gender-manager-body { padding: 0 24px 24px; }
-.gender-manager-body p, .gender-capacity > p, .test-gender-plan > p { color: var(--shell-muted); font-size: 13px; line-height: 1.7; }
-.gender-capacity > p { margin: 16px 24px; }
+.gender-manager-body p, .test-gender-plan > p { color: var(--shell-muted); font-size: 13px; line-height: 1.7; }
+.assignment-status { margin: 20px 0; border: 1px solid var(--shell-border); border-radius: 14px; background: var(--shell-panel); overflow: hidden; }
+.assignment-status > header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 20px 24px 14px; }
+.assignment-status h2 { margin: 0; font-size: 18px; }
+.assignment-status header p, .assignment-status-notes { color: var(--shell-muted); font-size: 12px; line-height: 1.6; }
+.assignment-status header p { margin: 6px 0 0; }
+.assignment-status header > span { font-size: 13px; white-space: nowrap; }
+.assignment-status header strong { color: var(--shell-accent); margin-left: 6px; }
+.assignment-status-table { border-collapse: collapse; width: 100%; font-size: 13px; white-space: nowrap; text-align: right; }
+.assignment-status-table th, .assignment-status-table td { padding: 9px 24px; }
+.assignment-status-table thead { background: var(--shell-panel-soft); color: var(--shell-muted); }
+.assignment-status-table th { font-weight: 600; }
+.assignment-status-table th[scope=rowgroup] { text-align: left; vertical-align: top; color: var(--shell-text); width: 12%; }
+.assignment-status-table th[scope=row], .assignment-status-table thead th:nth-child(-n+2) { text-align: left; }
+.assignment-status-table .grade-start { border-top: 1px solid var(--shell-border); }
+.assignment-status-table .unknown-row { color: var(--shell-muted); }
+.assignment-status-table .has-waiters { color: var(--shell-accent); font-weight: 700; }
+.assignment-status-table tfoot { border-top: 1px solid var(--shell-border); background: var(--shell-panel-soft); font-weight: 700; }
+.assignment-status-notes { padding: 10px 24px; display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.waiting-reasons { padding: 14px 24px; border-top: 1px solid var(--shell-border); }
+.waiting-reasons h3 { font-size: 13px; margin: 0 0 10px; }
+.waiting-reasons > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.reason-filter { background: transparent; color: var(--shell-muted); border: 1px solid var(--shell-border); border-radius: 8px; padding: 7px 10px; font-size: 12px; font-weight: 500; }
+.reason-filter[aria-pressed=true] { background: var(--shell-accent-soft); border-color: var(--shell-accent); color: var(--shell-accent); }
+.waiting-details { border-top: 1px solid var(--shell-border); }
+.waiting-details > summary { padding: 14px 24px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.waiting-details .table-wrap { max-height: 320px; overflow: auto; }
+@media(max-width:650px) { .assignment-status > header, .assignment-status-notes, .waiting-reasons { padding-inline: 16px; }.assignment-status-table th, .assignment-status-table td { padding-inline: 12px; } }
 .gender-manager-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 20px; margin: 16px 0; }
 .gender-manager-tools > label:first-child { display: grid; gap: 8px; }
 .gender-manager input, .gender-manager select { min-width: 100px; max-width: 220px; padding: 10px; }

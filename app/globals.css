@@ -652,3 +652,50 @@ html[data-theme="dark"] .separation-issue,html[data-theme="dark"] .separation-st
 .inactive-conditions {margin:16px 20px;color:var(--shell-muted);font-size:12px;}
 .inactive-conditions summary {cursor:pointer;}
 @media(max-width:600px){.separation-condition-row {align-items:flex-start;flex-direction:column;}.inactive-conditions .separation-condition-row {margin-inline:0;}}
+
+/* Assignment explanations and the final-table state share both palettes. */
+.student-result-page { max-width: 1020px; margin: 0 auto; padding: 42px 28px; }
+.student-result-page .page-title p { color: var(--shell-muted); line-height: 1.7; }
+.result-lookup { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 16px; padding: 24px; background: var(--shell-panel); border: 1px solid var(--shell-border); border-radius: 14px; margin: 24px 0; }
+.result-lookup label { display: grid; gap: 8px; flex: 1; min-width: 130px; }
+.result-lookup input { width: 100%; min-height: 46px; }
+.result-lookup button { min-height: 46px; }
+.student-result { padding: 28px; border: 1px solid var(--shell-border); border-radius: 14px; background: var(--shell-panel); }
+.student-result header p, .reason-note { font-size: 13px; color: var(--shell-muted); line-height: 1.7; }
+.result-room { display: flex; justify-content: space-between; gap: 20px; background: var(--shell-accent-soft); padding: 24px; margin: 22px 0; border-radius: 12px; }
+.result-room > div { display: grid; gap: 8px; }
+.result-room strong { font-size: 23px; }
+.result-room span { color: var(--shell-muted); }
+.result-comparison { padding: 12px 0; }
+.result-comparison h3 { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
+.compatibility-reasons { list-style: none; padding: 0; margin: 16px 0; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+.compatibility-reasons li { min-width: 0; padding: 14px; background: var(--shell-panel-soft); border: 1px solid var(--shell-border); border-radius: 10px; }
+.compatibility-reasons li > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; font-size: 13px; }
+.compatibility-reasons li span { font-size: 11px; color: var(--shell-muted); }
+.compatibility-reasons li p { margin: 8px 0 0; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; color: var(--shell-muted); }
+.compatibility-reasons .reason-good span { color: var(--success-text); }
+.compatibility-reasons .reason-difference { border-color: var(--grade3); }
+.compatibility-reasons .reason-difference span { color: var(--grade3); }
+.room-reasons { margin: 10px 0 0; padding: 10px; border-top: 1px solid var(--shell-border); font-size: 12px; text-align: left; }
+.room-reasons summary { cursor: pointer; color: var(--shell-accent); }
+.room-reasons h4 { line-height: 1.6; overflow-wrap: anywhere; }
+.room-reasons .compatibility-reasons { grid-template-columns: minmax(0,1fr); }
+.room-reasons .compatibility-reasons li { padding: 9px; }
+.room-reasons h4 span { white-space: nowrap; color: var(--shell-accent); }
+.assignment-final-panel { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding: 22px; margin: 20px 0; border: 1px solid var(--shell-border); border-radius: 14px; background: var(--shell-panel); }
+.assignment-final-panel h2 { margin: 0 0 8px; font-size: 20px; }
+.assignment-final-panel p { margin: 0; color: var(--shell-muted); font-size: 14px; line-height: 1.7; }
+.assignment-final-panel small { flex-basis: 100%; color: var(--grade3); }
+.assignment-settings { border: 0; padding: 0; margin: 0; min-width: 0; }
+.assignment-settings:disabled { opacity: .7; }
+.overview-final-state, .result-entry { color: var(--shell-muted); font-size: 14px; line-height: 1.7; }
+.result-entry a, .overview-final-state a { color: var(--shell-accent); }
+.overview-private-reasons { padding: 20px; border-top: 1px solid var(--shell-border); }
+.overview-private-reasons .compatibility-reasons { grid-template-columns: repeat(2,minmax(0,1fr)); }
+@media (max-width: 650px) {
+  .student-result-page { padding: 24px 14px; }
+  .student-result, .result-lookup { padding: 18px; }
+  .compatibility-reasons, .overview-private-reasons .compatibility-reasons { grid-template-columns: minmax(0,1fr); }
+  .result-room { flex-direction: column; padding: 18px; }
+  .result-lookup button { width: 100%; }
+}

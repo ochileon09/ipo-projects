@@ -8,6 +8,8 @@ const { floorRooms, gridFromLegacyFloor } = require('../.codex_tmp/matching-test
 const { planManualMove } = require('../.codex_tmp/matching-tests/dormitory-layout.js');
 const { roommateCompatibility, showerOverlapMinutes, hasDetailedHabits } = require('../.codex_tmp/matching-tests/roommate-matching.js');
 const { buildDormitoryView } = require('../.codex_tmp/matching-tests/dormitory-view.js');
+const { compatibilityBreakdown } = require('../.codex_tmp/matching-tests/roommate-matching.js');
+const { studentAssignmentResult } = require('../.codex_tmp/matching-tests/student-result.js');
 
 function student(studentId, overrides = {}) {
   return { ...createDefaultRoster(6, 16).find(row => row.student_id === studentId), id: studentId, is_default: false, student_name: '학생' + studentId, created_at: '2026-10-01T00:00:00Z', shower_duration_minutes:10,night_noise_activity:1,night_light_usage:1,alarm_repeats:0,...overrides };
@@ -362,4 +364,91 @@ test('separation approval eligibility catches unmatched, ambiguous, out-of-roste
  assert.equal(separationApplication({...r,active:false},[a,b],school,[]).state,'inactive');
  assert.equal(separationApplication(r,[a],school,[]).state,'warning');
  assert.equal(separationApplication(r,[a,b],school,[{id:'same',students:[a,b]}]).state,'warning');
+});
+
+test('explanations are the scoring source, including midnight, overlap and mismatched preferences', () => {
+  const a = student('2101', {sleep_time:'23:50',environment_answers:{version:1,humidity:1,summer_ac:1,winter_heater:3}});
+  const b = student('2102', {sleep_time:'00:10',tidiness:5,environment_answers:{version:1,humidity:3,summer_ac:3,winter_heater:1}});
+  const reasons = compatibilityBreakdown(a,b);
+  assert.equal(reasons.find(x=>x.key==='sleep_time').summary,'취침 시간 차이 20분');
+  assert.equal(reasons.find(x=>x.key==='shower_duration_minutes').assessment,'difference');
+  assert.equal(reasons.find(x=>x.key==='humidity').assessment,'difference');
+  assert.equal(reasons.find(x=>x.key==='noise').assessment,'unknown');
+  assert.equal(reasons.reduce((n,x)=>n+x.weight*x.value,0),roommateCompatibility(a,b));
+  assert.equal(reasons.reduce((n,x)=>n+x.weight,0),14.5);
+  assert.equal(roomCompatibilityScore([a,b]),Math.round(roommateCompatibility(a,b)/14.5*100)/10);
+});
+
+test('explanations distinguish indifference and auto-filled answers from positive compatibility evidence', () => {
+  const a=student('2101',{flexible_preferences:['tidiness'],auto_filled_fields:['shower_duration_minutes','humidity'],environment_answers:{version:1,humidity:0,summer_ac:0,winter_heater:0}});
+  const b=student('2102',{environment_answers:{version:1,humidity:2,summer_ac:3,winter_heater:3}});
+  const reasons=compatibilityBreakdown(a,b);
+  assert.equal(reasons.find(x=>x.key==='tidiness').assessment,'neutral');
+  assert.equal(reasons.find(x=>x.key==='humidity').assessment,'unknown');
+  assert.equal(reasons.find(x=>x.key==='summer_ac').assessment,'neutral');
+  assert.equal(reasons.find(x=>x.key==='shower_duration_minutes').assessment,'unknown');
+  assert(compatibilityBreakdown({...a,is_default:true},b).every(x=>x.assessment==='unknown'));
+});
+
+function finalFixture() {
+  const input={surveys:[student('2101'),student('2102',{shower_time:'22:00'})],school:{classCount:1,studentsPerClass:4,roomCapacity:2},layout:null,manualAssignments:[],testEnabled:false,includeDefaults:false};
+  const initial=buildDormitoryView(input);
+  const finalAssignment={id:'fixed',confirmed_at:'2026-11-18T01:00:00Z',source_revision:1,layout:initial.effectiveLayout,school:input.school,rooms:structuredClone(initial.allocation.rooms)};
+  return {input,initial,finalAssignment};
+}
+
+test('a final table freezes beds, answers, scores and layout through new surveys and changed options',()=>{
+  const {input,initial,finalAssignment}=finalFixture();
+  const changed={...input,surveys:[student('2101',{sleep_time:'04:00'}),student('2102'),student('2103')],manualAssignments:[{studentId:'2101',roomId:initial.allocation.rooms.find(x=>x.grade===2&&x.students.length===0).id,bedIndex:1}],testEnabled:true,finalAssignment};
+  const final=buildDormitoryView(changed);
+  assert.deepEqual(final.allocation.rooms,initial.allocation.rooms);
+  assert.equal(final.assignedCount,2);
+  assert.deepEqual(final.allocation.waiting.map(x=>x.student_id),['2103']);
+  assert.equal(final.finalizedAt,finalAssignment.confirmed_at);
+  const unlocked=buildDormitoryView({...changed,finalAssignment:null});
+  assert.equal(unlocked.assignedCount,3);
+  assert.equal(unlocked.finalizedAt,null);
+});
+
+test('student results require both exact identity fields and expose only scoped explanations',()=>{
+  const {input,initial}=finalFixture();
+  assert.equal(studentAssignmentResult(initial,'2101','틀린 이름'),null);
+  assert.equal(studentAssignmentResult(initial,'2103','학생2101'),null);
+  const result=studentAssignmentResult(initial,'2101','학생2101');
+  assert(result.assigned);assert.equal(result.phase,'proposal');
+  assert.equal(result.comparisons.length,1);
+  const json=JSON.stringify(result);
+  assert(!json.includes('학생2102'));assert(!json.includes('student_id'));assert(!json.includes('sleep_time":"'));assert(!json.includes('avoid_with'));
+  assert.equal(result.roomScore,initial.allocation.rooms.find(x=>x.students.length).score);
+  assert.equal(input.surveys.length,2);
+});
+
+test('final student results retain the saved score after resubmission and show new entrants waiting',()=>{
+  const {input,initial,finalAssignment}=finalFixture();
+  const view=buildDormitoryView({...input,surveys:[student('2101',{sleep_time:'04:00'}),student('2102'),student('2103')],finalAssignment});
+  const result=studentAssignmentResult(view,'2101','학생2101');
+  assert(result.assigned);assert.equal(result.phase,'final');
+  assert.equal(result.roomScore,initial.allocation.rooms.find(x=>x.students.length).score);
+  const waiting=studentAssignmentResult(view,'2103','학생2103');
+  assert(!waiting.assigned);assert.equal(waiting.phase,'final');assert(waiting.message.includes('확정을 해제'));
+});
+
+test('multi-person rooms expose every roommate comparison with the average pair score',()=>{
+  const input={surveys:[student('2101'),student('2102'),student('2103')],school:{classCount:1,studentsPerClass:3,roomCapacity:3},layout:null,manualAssignments:[],testEnabled:false,includeDefaults:false};
+  const view=buildDormitoryView(input);
+  const result=studentAssignmentResult(view,'2101','학생2101');
+  assert(result.assigned);assert.equal(result.comparisons.length,2);
+  assert(result.comparisons.every(c=>c.score>=0&&c.score<=10));
+});
+
+test('a response arriving for an already reserved default seat retains that seat, and ambiguous identities are blocked',()=>{
+  const input={surveys:[student('2101')],school:{classCount:1,studentsPerClass:2,roomCapacity:2},layout:null,manualAssignments:[],testEnabled:false,includeDefaults:true};
+  const initial=buildDormitoryView(input);
+  const finalAssignment={id:'default-final',confirmed_at:'2026-11-18T01:00:00Z',source_revision:1,layout:initial.effectiveLayout,school:input.school,rooms:structuredClone(initial.allocation.rooms)};
+  const view=buildDormitoryView({...input,surveys:[student('2101'),student('2102')],finalAssignment});
+  assert(studentAssignmentResult(view,'2102','학생2102').assigned);
+  assert(!view.allocation.waiting.some(s=>s.student_id==='2102'));
+  const ambiguous=buildDormitoryView({...input,surveys:[student('2101'),student('2102'),student('2102',{id:'other',student_name:'다른 이름'})],finalAssignment});
+  const result=studentAssignmentResult(ambiguous,'2102','학생2102');
+  assert(!result.assigned);assert(result.message.includes('서로 다른 이름'));
 });

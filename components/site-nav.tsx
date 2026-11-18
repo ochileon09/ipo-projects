@@ -9,6 +9,7 @@ import { useAdminSession } from "@/components/admin-session";
 const links = [
   { href: "/", label: "대시보드", icon: "dashboard" as IconName },
   { href: "/student", label: "학생 설문 신청", icon: "survey" as IconName },
+  { href: "/result", label: "내 배정 결과", icon: "check" as IconName },
   { href: "/admin", label: "기숙사 배정 관리", icon: "building" as IconName },
   { href: "/help", label: "도움말", icon: "help" as IconName },
 ];

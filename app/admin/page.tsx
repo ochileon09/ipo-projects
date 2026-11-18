@@ -13,6 +13,9 @@ import { conflictingStudentIds, isSchoolStudentId, type SurveyRow } from "@/lib/
 import { separationEligibility, separationApplication, type SeparationCondition, buildDormitoryView, type SchoolSettings, type SeparationRequest } from "@/lib/dormitory-view";
 import { hasDetailedHabits } from "@/lib/roommate-matching";
 import { useAdminSession } from "@/components/admin-session";
+import type { FinalAssignment } from "@/lib/dormitory-view";
+import { RoomReasons } from "@/components/room-reasons";
+import { AssignmentConfirmDialog } from "@/components/assignment-confirm-dialog";
 
 const scoreDescription = "0~10점 생활 적합도: 수면 시간, 정리·온도·환기·조명·습도·여름 에어컨·겨울 히터 선호와 샤워 사용 구간을 비교합니다. 승인된 분리 요청은 점수보다 우선합니다. 이전 설문의 야간·알람 응답은 기존 계산을 유지하며 새 설문에는 묻지 않습니다. 수학적 최적해를 보장하지 않습니다.";
 type DeletedSurvey = { id: string; student_id: string; student_name: string; deleted_at: string };
@@ -24,7 +27,8 @@ function RoomCard({ room }: { room: AssignedRoom<SurveyRow> }) {
     <div className="compact-bed-list">{Array.from({ length: room.capacity }, (_, bedIndex) => {
       return <StudentBed key={bedIndex} roomId={room.id} roomNumber={room.number} grade={room.grade} bedIndex={bedIndex} student={room.beds[bedIndex]} />;
     })}</div>
-    <small className="match-score">{uncertain ? "기본값 포함 · 응답 후 점수 변경" : room.students.some(student=>!hasDetailedHabits(student)) ? "추가 문항 미응답 · 임시 점수" : room.students.length > 1 ? "생활 패턴 적합도" : "룸메이트 응답 후 점수 산출"}</small>
+    <small className="match-score">{uncertain ? "기본값 포함 · 참고 점수" : room.students.some(student=>!hasDetailedHabits(student)) ? "추가 문항 미응답 · 참고 점수" : room.students.length > 1 ? "생활 패턴 적합도" : "룸메이트 응답 후 점수 산출"}</small>
+    <RoomReasons students={room.students} />
   </section>;
 }
 
@@ -51,6 +55,9 @@ export default function AdminPage() {
   const [draftLayout, setDraftLayout] = useState<DormLayout | null>(null);
   const [manualAssignments, setManualAssignments] = useState<ManualAssignment[]>([]);
   const [placementRevision, setPlacementRevision] = useState(0);
+  const [finalAssignment, setFinalAssignment] = useState<FinalAssignment | null>(null);
+  const [finalBusy, setFinalBusy] = useState(false);
+  const [finalDialog, setFinalDialog] = useState<{ action: "confirm" | "unlock"; revision: number } | null>(null);
   const [savingPlacement, setSavingPlacement] = useState(false);
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [draggingStudentId, setDraggingStudentId] = useState<string | null>(null);
@@ -95,6 +102,7 @@ export default function AdminPage() {
         const nextManual=(management.manual_assignments??[]) as ManualAssignment[];
         setManualAssignments(previous=>JSON.stringify(previous)===JSON.stringify(nextManual)?previous:nextManual);
         setPlacementRevision(Number(management.placement_revision));
+        setFinalAssignment(previous => JSON.stringify(previous) === JSON.stringify(management.final_assignment ?? null) ? previous : management.final_assignment ?? null);
       }
       const settings = data?.school;
       if (settings) {
@@ -120,6 +128,7 @@ export default function AdminPage() {
       setSettingsNotice(""); setErrorMessage(""); setDraftLayout(null); setSavedLayout(null);
       setManualAssignments([]); setSelectedStudentId(null); setDraggingStudentId(null); setHoverBed(null);
       setUndoPlacement(null); setPlacementMessage(""); setIncludeDefaults(false); setIsLoading(true);
+      setFinalAssignment(null); setFinalDialog(null);
       previousAssignments.current = new Map(); schoolDraftDirty.current = false; setMovedCount(0);
     }
     return () => { dashboardActive.current = false; requestVersion.current += 1; };
@@ -213,7 +222,7 @@ export default function AdminPage() {
   }
 
   const schoolRosterSize = 3 * school.classCount * school.studentsPerClass;
-  const { effectiveLayout, roster, allocation } = useMemo(() => buildDormitoryView({ surveys, school, layout: savedLayout, manualAssignments, testEnabled, includeDefaults, avoidanceRequests }), [surveys, school, savedLayout, manualAssignments, testEnabled, includeDefaults, avoidanceRequests]);
+  const { effectiveLayout, roster, allocation } = useMemo(() => buildDormitoryView({ surveys, school, layout: savedLayout, manualAssignments, testEnabled, includeDefaults, avoidanceRequests, finalAssignment }), [surveys, school, savedLayout, manualAssignments, testEnabled, includeDefaults, avoidanceRequests, finalAssignment]);
   const roomsById = useMemo(() => new Map(allocation.rooms.map(room => [room.id, room])), [allocation.rooms]);
   const actualCount = roster.allStudents.filter(student => !student.is_default && !student.is_test).length;
   const testCount = roster.allStudents.filter(student => student.is_test).length;
@@ -224,7 +233,7 @@ export default function AdminPage() {
   const defaultCount = roster.activeStudents.filter(student => student.is_default).length;
   const gradeBeds = [1, 2, 3].map(grade => allocation.rooms.filter(room => room.grade === grade).reduce((sum, room) => sum + room.capacity, 0));
   const waitingActual = allocation.waiting.filter(student => !student.is_default && !student.is_test);
-  const actualAssignments = useMemo(() => new Map(allocation.rooms.flatMap(room => room.students.filter(student => !student.is_default && !student.is_test).map(student => [student.id, { building: effectiveLayout.find(building => room.id.startsWith(building.id + "/"))?.name, room: room.number }] as const))), [allocation.rooms, effectiveLayout]);
+  const actualAssignments = useMemo(() => new Map(allocation.rooms.flatMap(room => room.students.filter(student => !student.is_test).map(student => [student.id, { building: effectiveLayout.find(building => room.id.startsWith(building.id + "/"))?.name, room: room.number }] as const))), [allocation.rooms, effectiveLayout]);
   const eligibleResponseIds = new Set(roster.allStudents.filter(student => !student.is_default && !student.is_test).map(student => student.id));
   const conflictIds = conflictingStudentIds(roster.receivedStudents);
   const pendingRequests = avoidanceRequests.filter(request=>request.status==="pending");
@@ -233,7 +242,7 @@ export default function AdminPage() {
   const activePlacementStudent=allocation.rooms.flatMap(room=>room.students).find(student=>student.student_id===(draggingStudentId??selectedStudentId))??null;
 
   async function saveManualPlacement(next:ManualAssignment[], undo=false) {
-    if(savingPlacement)return;
+    if(savingPlacement||finalAssignment||finalBusy)return;
     setSavingPlacement(true);setPlacementMessage("");setSelectedStudentId(null);setDraggingStudentId(null);setHoverBed(null);
     const previous=manualAssignments;
     const expected=undo?undoPlacement?.revision:placementRevision;
@@ -248,7 +257,7 @@ export default function AdminPage() {
   }
 
   function moveStudent(studentId:string,target:BedAddress) {
-    if(savingPlacement)return;
+    if(savingPlacement||finalAssignment||finalBusy)return;
     try {
       const retained=manualAssignments.filter(pin=>isSchoolStudentId(pin.studentId,school.classCount,school.studentsPerClass));
       const next=planManualMove(allocation.rooms,retained,studentId,target);
@@ -258,11 +267,26 @@ export default function AdminPage() {
   }
 
   function selectBed(target:BedAddress) {
-    if(savingPlacement)return;
+    if(savingPlacement||finalAssignment||finalBusy)return;
     const student=roomsById.get(target.roomId)?.beds[target.bedIndex];
     if(selectedStudentId){moveStudent(selectedStudentId,target);return;}
     if(student){setSelectedStudentId(student.student_id);setPlacementMessage(student.student_name+" 선택됨 · 이동할 빈 자리나 교환할 학생을 선택하세요.");}
     else setPlacementMessage("먼저 옮길 학생을 선택하세요.");
+  }
+
+  async function changeFinalAssignment() {
+    if (!finalDialog || finalBusy) return;
+    setFinalBusy(true); setErrorMessage("");
+    let failure = "";
+    try {
+      const response = await fetch("/api/assignments", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ adminKey, action: finalDialog.action, expectedRevision: finalDialog.revision }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "저장하지 못했습니다.");
+      setSelectedStudentId(null); setDraggingStudentId(null); setUndoPlacement(null);
+      setSettingsNotice(finalDialog.action === "confirm" ? "최종 배정표를 DB에 저장했습니다." : "확정을 해제하고 최신 응답으로 다시 배정했습니다.");
+    } catch (error) { failure = error instanceof Error ? error.message : "연결을 확인해 주세요."; }
+    finally { setFinalDialog(null); await loadDashboard(adminKey); if (failure) setErrorMessage(failure); setFinalBusy(false); }
   }
 
   useEffect(() => {
@@ -289,7 +313,10 @@ export default function AdminPage() {
     <div className="admin-title-row"><div><h1>기숙사 배정 지도</h1><div className="admin-sync-meta"><span className={"sync-state " + syncState} role="status" aria-label="동기화 상태"><i />{syncState === "connected" ? "실시간 연결됨" : syncState === "connecting" ? "실시간 연결 중" : "연결 복구 중"}</span><small>{updatedAt ? "최근 반영 " + updatedAt : "데이터 확인 중"}{movedCount > 0 ? " · " + movedCount + "명 배정 변경" : ""}</small></div></div><div className="admin-actions"><Link className="help-link" href="/help#admin">도움말</Link><button onClick={() => void loadDashboard(adminKey, true)} disabled={isLoading}>{isLoading ? "불러오는 중..." : "DB 새로고침"}</button><span className="admin-action-feedback" role="status">{settingsNotice}</span></div></div>
     {errorMessage && <p className="notice error" role="alert">{errorMessage}</p>}
 
-    <details className="admin-settings-panel"><summary>명단·건물 설정<span>{testEnabled ? "테스트 모드" : "실제 운영"}</span></summary><div className="admin-settings-body"><section className="capacity-panel" aria-labelledby="capacity-title"><div><h2 id="capacity-title">학교 명단과 기본 인실</h2></div>
+    <section className="assignment-final-panel" aria-label="최종 배정 관리"><div><h2>{finalAssignment ? "최종 배정 확정됨" : "임시 배정 · 검토 중"}</h2><p>{finalAssignment ? new Date(finalAssignment.confirmed_at).toLocaleString("ko-KR", {timeZone:"Asia/Seoul"}) + " 확정 · 새 설문은 접수되지만 배치·점수는 유지됩니다." : "호실과 선정 이유를 검토한 뒤 최종 확정하세요."}</p></div><button type="button" className={finalAssignment ? "secondary-button" : ""} disabled={isLoading || finalBusy || savingPlacement || isSavingLayout || isSavingSettings || reviewBusy || conditionBusy || isChangingMode || !!changingSurveyId || (!finalAssignment && (testEnabled || storedTestCount > 0 || !!draftLayout || schoolDraftDirty.current || assignedCount === 0))} onClick={() => setFinalDialog({action:finalAssignment ? "unlock" : "confirm", revision:placementRevision})}>{finalAssignment ? "확정 해제" : "최종 확정"}</button>{!finalAssignment && (testEnabled || storedTestCount > 0 || !!draftLayout || schoolDraftDirty.current) && <small>테스트 학생을 제거하고 편집 중인 설정·구조를 저장하거나 취소한 뒤 확정하세요.</small>}</section>
+    {finalDialog && <AssignmentConfirmDialog unlock={finalDialog.action === "unlock"} assigned={assignedCount} waiting={allocation.waiting.length + rosterReviewCount} busy={finalBusy} onCancel={() => setFinalDialog(null)} onConfirm={() => void changeFinalAssignment()} />}
+
+    <details className="admin-settings-panel"><summary>명단·건물 설정<span>{testEnabled ? "테스트 모드" : "실제 운영"}</span></summary><fieldset className="assignment-settings" disabled={!!finalAssignment || finalBusy}><div className="admin-settings-body"><section className="capacity-panel" aria-labelledby="capacity-title"><div><h2 id="capacity-title">학교 명단과 기본 인실</h2></div>
       <form className="capacity-form" onSubmit={saveSettings}>
         <label><span>학년별 반 수</span><div className="number-input"><input type="number" min="1" max="9" value={draftSchool.classCount} onChange={event => editSchool({ classCount: Number(event.target.value) })} required /><b>반</b></div></label>
         <label><span>반당 학생 수</span><div className="number-input"><input type="number" min="1" max="30" value={draftSchool.studentsPerClass} onChange={event => editSchool({ studentsPerClass: Number(event.target.value) })} required /><b>명</b></div></label>
@@ -302,16 +329,16 @@ export default function AdminPage() {
 
     <section className="test-panel admin-test-panel" aria-labelledby="test-mode-title"><div><h2 id="test-mode-title">{testEnabled ? "테스트 모드 사용 중" : "실제 운영 모드"}</h2>{!testEnabled && storedTestCount > 0 && <p>저장된 가상 학생 {storedTestCount}명은 현재 배정에서 제외되어 있습니다. 제거 버튼으로 DB에서도 정리할 수 있습니다.</p>}<label className="check-label defaults-option"><input type="checkbox" checked={includeDefaults} disabled={isChangingMode} onChange={event => void changeOperation(testEnabled, event.target.checked)} />미응답 학생도 기본값으로 배정</label></div><div className="test-actions"><button className="secondary-button" onClick={() => void createTestStudents()} disabled={isChangingMode || isLoading}>{isChangingMode ? "변경 중..." : testEnabled ? "테스트 학생 다시 생성" : "테스트 학생 생성"}</button>{(testEnabled || storedTestCount > 0) && <button className="danger-outline" onClick={() => void changeOperation(false, includeDefaults)} disabled={isChangingMode || isLoading}>{testEnabled ? "테스트 종료 · 가상 학생 제거" : "저장된 가상 학생 제거"}</button>}</div></section>
 
-    </div></details><section className="summary-grid four-summary" aria-label="기숙사 배정 요약"><article><span>실제 설문 접수</span><strong>{roster.receivedStudents.length}명</strong><small>배정 대상 {actualCount}명 · 명단 확인 필요 {rosterReviewCount}명</small></article><article><span>건물 수용 정원</span><strong>{totalBeds}명</strong><small>{allocation.rooms.length}개 방 · 학교 명단 {schoolRosterSize}명</small></article><article><span>배정 / 미배정</span><strong>{assignedCount} / {allocation.waiting.length + rosterReviewCount}명</strong><small>실제 자리 부족 {waitingActual.length}명 · 명단 확인 {rosterReviewCount}명</small><small>테스트 {testCount}명 · 기본값 배정 {defaultCount}명</small></article><article><span>학년별 수용 정원</span><strong>{gradeBeds.join(" / ")}</strong><small>1학년 / 2학년 / 3학년 · 미응답 {missingCount}명</small></article></section>
-    {allocation.waiting.length > 0 && <section className="waiting-panel"><h2>자리·분리 조건으로 배정 대기</h2><p>해당 학년의 호실 정원과 승인된 분리 조건을 확인해 주세요. 실제 응답자부터 배정합니다.</p><div>{allocation.waiting.map(student => <span key={student.student_id}>{student.student_name} · {student.student_id}{student.is_test ? " (테스트)" : student.is_default ? " (기본값)" : " (실제)"}</span>)}</div></section>}
+    </div></fieldset></details><section className="summary-grid four-summary" aria-label="기숙사 배정 요약"><article><span>실제 설문 접수</span><strong>{roster.receivedStudents.length}명</strong><small>배정 대상 {actualCount}명 · 명단 확인 필요 {rosterReviewCount}명</small></article><article><span>건물 수용 정원</span><strong>{totalBeds}명</strong><small>{allocation.rooms.length}개 방 · 학교 명단 {schoolRosterSize}명</small></article><article><span>배정 / 미배정</span><strong>{assignedCount} / {allocation.waiting.length + rosterReviewCount}명</strong><small>실제 자리 부족 {waitingActual.length}명 · 명단 확인 {rosterReviewCount}명</small><small>테스트 {testCount}명 · 기본값 배정 {defaultCount}명</small></article><article><span>학년별 수용 정원</span><strong>{gradeBeds.join(" / ")}</strong><small>1학년 / 2학년 / 3학년 · 미응답 {missingCount}명</small></article></section>
+    {allocation.waiting.length > 0 && <section className="waiting-panel"><h2>{finalAssignment ? "확정 배정표 외 접수 · 배정 대기" : "자리·분리 조건으로 배정 대기"}</h2><p>{finalAssignment ? "새 응답은 보관되며, 확정을 해제해야 배정표에 반영됩니다." : "해당 학년의 호실 정원과 승인된 분리 조건을 확인해 주세요. 실제 응답자부터 배정합니다."}</p><div>{allocation.waiting.map(student => <span key={student.student_id}>{student.student_name} · {student.student_id}{student.is_test ? " (테스트)" : student.is_default ? " (기본값)" : " (실제)"}</span>)}</div></section>}
 
     <section className="admin-board received-surveys" aria-labelledby="received-title"><div className="board-heading"><div><h2 id="received-title">실제 설문 접수 명단</h2></div><span>{roster.receivedStudents.length}명</span></div>
       <div className="table-wrap"><table className="survey-table"><thead><tr><th>학번</th><th>이름</th><th>배정 상태</th><th>기상</th><th>취침</th><th>주로 씻기</th><th>최근 제출</th><th>관리</th></tr></thead><tbody>
         {!isLoading && roster.receivedStudents.map(student => {
           const outside = roster.outsideRoster.some(response => response.id === student.id);
-          const assignment = actualAssignments.get(student.id);
-          const status = outside ? "학교 명단 범위 밖" : !eligibleResponseIds.has(student.id) ? "같은 학번의 다른 이름 확인 필요" : assignment ? `${assignment.building} ${assignment.room}호 · ${manualStudentIds.has(student.student_id)?"수동 배정":"임시 배정"}` : "자리 부족 · 배정 대기";
-          return <tr key={student.id} className={conflictIds.has(student.student_id)?"identity-conflict":""}><td>{student.student_id}</td><td><strong>{student.student_name}</strong>{conflictIds.has(student.student_id)&&<small className="identity-warning">동일 학번 · 다른 이름</small>}{!!student.auto_filled_fields?.length&&<small className="auto-fill-badge" title="미응답 항목을 기본값으로 채웠습니다. 실제 응답과 구분해 보관합니다.">자동 보완 {student.auto_filled_fields.length}항목</small>}</td><td><span className={assignment ? "live-badge" : "default-badge"}>{status}</span>{outside && <small className="roster-row-reason">{Number(student.student_id[1])}반 {Number(student.student_id.slice(2))}번 · 설정: {school.classCount}개 반, 반당 {school.studentsPerClass}명</small>}</td><td>{student.wake_time.slice(0, 5)}</td><td>{student.sleep_time.slice(0, 5)}</td><td>{student.shower_time.slice(0, 5)}</td><td>{new Date(student.created_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", hour12: false })}</td><td><button type="button" className="survey-row-delete" aria-label={`${student.student_id} ${student.student_name} 설문 삭제`} disabled={!!changingSurveyId} onClick={() => { setErrorMessage(""); setDeleteTarget(student); }}>삭제</button></td></tr>;
+          const assignment = actualAssignments.get(student.id) ?? (finalAssignment ? actualAssignments.get("default-" + student.student_id) : undefined);
+          const status = outside ? "학교 명단 범위 밖" : !eligibleResponseIds.has(student.id) ? "같은 학번의 다른 이름 확인 필요" : assignment ? `${assignment.building} ${assignment.room}호 · ${finalAssignment?"최종 확정":manualStudentIds.has(student.student_id)?"수동 배정":"임시 배정"}` : finalAssignment ? "확정 이후 접수 · 배정 대기" : "자리 부족 · 배정 대기";
+          return <tr key={student.id} className={conflictIds.has(student.student_id)?"identity-conflict":""}><td>{student.student_id}</td><td><strong>{student.student_name}</strong>{conflictIds.has(student.student_id)&&<small className="identity-warning">동일 학번 · 다른 이름</small>}{!!student.auto_filled_fields?.length&&<small className="auto-fill-badge" title="미응답 항목을 기본값으로 채웠습니다. 실제 응답과 구분해 보관합니다.">자동 보완 {student.auto_filled_fields.length}항목</small>}</td><td><span className={assignment ? "live-badge" : "default-badge"}>{status}</span>{outside && <small className="roster-row-reason">{Number(student.student_id[1])}반 {Number(student.student_id.slice(2))}번 · 설정: {school.classCount}개 반, 반당 {school.studentsPerClass}명</small>}</td><td>{student.wake_time.slice(0, 5)}</td><td>{student.sleep_time.slice(0, 5)}</td><td>{student.shower_time.slice(0, 5)}</td><td>{new Date(student.created_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", hour12: false })}</td><td><button type="button" className="survey-row-delete" aria-label={`${student.student_id} ${student.student_name} 설문 삭제`} disabled={!!changingSurveyId || !!finalAssignment || finalBusy} onClick={() => { setErrorMessage(""); setDeleteTarget(student); }}>삭제</button></td></tr>;
         })}
         {(isLoading || roster.receivedStudents.length === 0) && <tr><td colSpan={8}><div className="empty-table">{isLoading ? "실제 설문을 불러오는 중입니다" : "아직 접수된 실제 설문이 없습니다"}</div></td></tr>}
       </tbody></table></div>
@@ -319,21 +346,21 @@ export default function AdminPage() {
 
     <section className="admin-board separation-review"><div className="board-heading"><h2>분리 배정 요청 검토</h2><span>{avoidanceRequests.filter(request=>request.status==="pending").length}건 대기</span></div>
       <p className="avoidance-help">사유를 검토해 O(승인) 또는 X(기각)를 선택하세요. 승인 전에는 배정에 반영되지 않습니다. 처리 후 신청과 사유는 삭제되며, 승인된 분리 조건만 유지됩니다.</p>
-      {pendingRequests.map(request=>{const issue=separationEligibility(request,surveys,school);return <article className="separation-review-row" key={request.id}><strong>{request.requester_id} {request.requester_name} → {request.target_student_id} {request.target_student_name}</strong><p>{request.reason}</p>{issue?<p className="separation-issue" role="status">대상 확인 필요: {issue}</p>:<p className="separation-ready">학번·이름·학년 확인됨</p>}<div><span>{request.status==="approved"?"승인됨":request.status==="rejected"?"기각됨":"검토 대기"}</span><button type="button" aria-label={`${request.requester_id} 요청 승인`} aria-pressed={request.status==="approved"} disabled={reviewBusy||!!issue} title={issue??"대상 정보가 확인된 요청입니다."} onClick={()=>void reviewRequest(request.id,true)}>O 승인</button><button type="button" className="secondary-button" aria-label={`${request.requester_id} 요청 기각`} aria-pressed={request.status==="rejected"} disabled={reviewBusy} onClick={()=>void reviewRequest(request.id,false)}>X 기각</button></div></article>})}
+      {pendingRequests.map(request=>{const issue=separationEligibility(request,surveys,school);return <article className="separation-review-row" key={request.id}><strong>{request.requester_id} {request.requester_name} → {request.target_student_id} {request.target_student_name}</strong><p>{request.reason}</p>{issue?<p className="separation-issue" role="status">대상 확인 필요: {issue}</p>:<p className="separation-ready">학번·이름·학년 확인됨</p>}<div><span>{request.status==="approved"?"승인됨":request.status==="rejected"?"기각됨":"검토 대기"}</span><button type="button" aria-label={`${request.requester_id} 요청 승인`} aria-pressed={request.status==="approved"} disabled={reviewBusy||!!issue||!!finalAssignment||finalBusy} title={issue??"대상 정보가 확인된 요청입니다."} onClick={()=>void reviewRequest(request.id,true)}>O 승인</button><button type="button" className="secondary-button" aria-label={`${request.requester_id} 요청 기각`} aria-pressed={request.status==="rejected"} disabled={reviewBusy||!!finalAssignment||finalBusy} onClick={()=>void reviewRequest(request.id,false)}>X 기각</button></div></article>})}
       {!pendingRequests.length && <p className="avoidance-help">접수된 요청이 없습니다.</p>}
     </section>
     <section className="admin-board separation-conditions" aria-label="승인된 분리 조건 관리"><div className="board-heading"><h2>승인된 분리 조건</h2><span>{separationConditions.filter(condition=>condition.active).length}건 유지</span></div>
       <p className="avoidance-help">처리된 신청·사유와 별도로 배정 조건만 관리합니다. 대상이 없거나 배정 대기 중이면 적용 상태를 확인하세요. 잘못 승인한 조건은 해제할 수 있습니다.</p>
-      {separationConditions.filter(condition=>condition.active).map(condition=>{const assessment=separationApplication(condition,surveys,school,allocation.rooms);return <article className="separation-condition-row" key={condition.id}><div><strong>{condition.requester_id} {condition.requester_name} ↔ {condition.target_student_id} {condition.target_student_name}</strong><p className={"separation-state "+assessment.state}>{assessment.label}</p>{assessment.detail&&<p className="separation-issue">{assessment.detail}</p>}</div><button type="button" className="secondary-button" disabled={conditionBusy} onClick={()=>void setCondition(condition.id,false)}>조건 해제</button></article>;})}
+      {separationConditions.filter(condition=>condition.active).map(condition=>{const assessment=separationApplication(condition,surveys,school,allocation.rooms);return <article className="separation-condition-row" key={condition.id}><div><strong>{condition.requester_id} {condition.requester_name} ↔ {condition.target_student_id} {condition.target_student_name}</strong><p className={"separation-state "+assessment.state}>{assessment.label}</p>{assessment.detail&&<p className="separation-issue">{assessment.detail}</p>}</div><button type="button" className="secondary-button" disabled={conditionBusy||!!finalAssignment||finalBusy} onClick={()=>void setCondition(condition.id,false)}>조건 해제</button></article>;})}
       {!separationConditions.some(condition=>condition.active)&&<p className="avoidance-help">유지 중인 분리 조건이 없습니다.</p>}
-      <details className="inactive-conditions"><summary>해제된 조건 {separationConditions.filter(condition=>!condition.active).length}건</summary>{separationConditions.filter(condition=>!condition.active).map(condition=>{const issue=pendingRequests.some(request=>request.survey_id===condition.survey_id&&request.target_student_id===condition.target_student_id&&request.target_student_name===condition.target_student_name)?"새 요청에서 사유를 검토한 뒤 승인해 주세요.":separationEligibility(condition,surveys,school);return <article className="separation-condition-row" key={condition.id}><div><strong>{condition.requester_id} {condition.requester_name} ↔ {condition.target_student_id} {condition.target_student_name}</strong><p>{issue??"대상 확인됨 · 필요하면 재적용할 수 있습니다."}</p></div><button type="button" className="secondary-button" disabled={conditionBusy||!!issue} onClick={()=>void setCondition(condition.id,true)}>재적용</button></article>;})}</details>
+      <details className="inactive-conditions"><summary>해제된 조건 {separationConditions.filter(condition=>!condition.active).length}건</summary>{separationConditions.filter(condition=>!condition.active).map(condition=>{const issue=pendingRequests.some(request=>request.survey_id===condition.survey_id&&request.target_student_id===condition.target_student_id&&request.target_student_name===condition.target_student_name)?"새 요청에서 사유를 검토한 뒤 승인해 주세요.":separationEligibility(condition,surveys,school);return <article className="separation-condition-row" key={condition.id}><div><strong>{condition.requester_id} {condition.requester_name} ↔ {condition.target_student_id} {condition.target_student_name}</strong><p>{issue??"대상 확인됨 · 필요하면 재적용할 수 있습니다."}</p></div><button type="button" className="secondary-button" disabled={conditionBusy||!!issue||!!finalAssignment||finalBusy} onClick={()=>void setCondition(condition.id,true)}>재적용</button></article>;})}</details>
     </section>
-    <details className="deleted-survey-history"><summary>삭제된 설문 <span>{deletedSurveys.length}건</span></summary><div className="table-wrap"><table className="survey-table"><thead><tr><th>학번</th><th>이름</th><th>삭제 시각</th><th>관리</th></tr></thead><tbody>{deletedSurveys.map(student => <tr key={student.id}><td>{student.student_id}</td><td>{student.student_name}</td><td>{new Date(student.deleted_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", hour12: false })}</td><td><button type="button" className="secondary-button survey-row-restore" aria-label={`${student.student_id} ${student.student_name} 설문 복구`} disabled={!!changingSurveyId} onClick={() => void changeSurvey(student.id, true)}>{changingSurveyId === student.id ? "복구 중..." : "복구"}</button></td></tr>)}{deletedSurveys.length === 0 && <tr><td colSpan={4}><div className="empty-table">삭제된 설문이 없습니다</div></td></tr>}</tbody></table></div></details>
+    <details className="deleted-survey-history"><summary>삭제된 설문 <span>{deletedSurveys.length}건</span></summary><div className="table-wrap"><table className="survey-table"><thead><tr><th>학번</th><th>이름</th><th>삭제 시각</th><th>관리</th></tr></thead><tbody>{deletedSurveys.map(student => <tr key={student.id}><td>{student.student_id}</td><td>{student.student_name}</td><td>{new Date(student.deleted_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", hour12: false })}</td><td><button type="button" className="secondary-button survey-row-restore" aria-label={`${student.student_id} ${student.student_name} 설문 복구`} disabled={!!changingSurveyId || !!finalAssignment || finalBusy} onClick={() => void changeSurvey(student.id, true)}>{changingSurveyId === student.id ? "복구 중..." : "복구"}</button></td></tr>)}{deletedSurveys.length === 0 && <tr><td colSpan={4}><div className="empty-table">삭제된 설문이 없습니다</div></td></tr>}</tbody></table></div></details>
     {deleteTarget && <SurveyDeleteDialog student={deleteTarget} busy={changingSurveyId === deleteTarget.id} error={errorMessage} onCancel={() => setDeleteTarget(null)} onDelete={() => void changeSurvey(deleteTarget.id, false)} />}
 
-    <StudentPlacementProvider value={{activeStudent:activePlacementStudent,selectedId:selectedStudentId,draggingId:draggingStudentId,hover:hoverBed,busy:savingPlacement,manualStudents:manualStudentIds,select:selectBed,drop:moveStudent,drag:setDraggingStudentId,over:setHoverBed}}>
+    <StudentPlacementProvider value={{activeStudent:activePlacementStudent,selectedId:selectedStudentId,draggingId:draggingStudentId,hover:hoverBed,busy:savingPlacement||!!finalAssignment||finalBusy,manualStudents:manualStudentIds,select:selectBed,drop:moveStudent,drag:setDraggingStudentId,over:setHoverBed}}>
     <section className="dorm-map school-dorm-map" aria-labelledby="map-title"><div className="map-heading"><div><h2 id="map-title">호실 지도</h2><Link className="help-link" href="/help#placement">배치 도움말</Link></div><div className="grade-legend"><span><i className="grade1-dot" />1학년</span><span><i className="grade2-dot" />2학년</span><span><i className="grade3-dot" />3학년</span></div></div>
-      <div className="manual-placement-tools"><span>수동 배치 <b>{allocation.validManual.length}명</b></span><button type="button" className="secondary-button" disabled={savingPlacement||!undoPlacement||undoPlacement.revision!==placementRevision} title="저장 후 다른 변경이 반영되기 전까지 실행 취소할 수 있습니다." onClick={()=>undoPlacement&&void saveManualPlacement(undoPlacement.assignments,true)}>배치 실행 취소</button><button type="button" className="secondary-button" disabled={savingPlacement||manualAssignments.length===0} onClick={()=>void saveManualPlacement([])}>수동 배치 해제 · 자동 배정</button>{selectedStudentId&&<button type="button" className="secondary-button" onClick={()=>{setSelectedStudentId(null);setPlacementMessage("");}}>선택 취소</button>}</div>
+      <div className="manual-placement-tools"><span>수동 배치 <b>{allocation.validManual.length}명</b></span><button type="button" className="secondary-button" disabled={!!finalAssignment||finalBusy||savingPlacement||!undoPlacement||undoPlacement.revision!==placementRevision} title="저장 후 다른 변경이 반영되기 전까지 실행 취소할 수 있습니다." onClick={()=>undoPlacement&&void saveManualPlacement(undoPlacement.assignments,true)}>배치 실행 취소</button><button type="button" className="secondary-button" disabled={!!finalAssignment||finalBusy||savingPlacement||manualAssignments.length===0} onClick={()=>void saveManualPlacement([])}>수동 배치 해제 · 자동 배정</button>{selectedStudentId&&<button type="button" className="secondary-button" onClick={()=>{setSelectedStudentId(null);setPlacementMessage("");}}>선택 취소</button>}</div>
       {(savingPlacement || placementMessage) && <p className="manual-placement-status" role="status">{savingPlacement ? "배치를 저장하는 중입니다..." : placementMessage}</p>}
       {allocation.invalidManual.length>0&&<p className="manual-placement-status">구조·학년·정원이 변경되어 적용할 수 없는 수동 배치 {allocation.invalidManual.length}건은 자동 배정을 적용했습니다.</p>}
       {effectiveLayout.map(building => <div className="building-block" key={building.id}><div className="building-heading"><div><strong>{building.name}</strong>{building.provisional && <span>임시 지도</span>}</div><p>{savedLayout ? "관리자가 저장한 구조" : "명단·기본 인실에 맞춘 자동 구조"}</p></div>

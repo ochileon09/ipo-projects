@@ -63,23 +63,62 @@ function alarmDisturbance(source: MatchingStudent, sleeper: MatchingStudent) {
   return (source.alarm_repeats ?? 2) / 5 * (sleeper.alarm_sensitivity - 1) / 4;
 }
 
-export function roommateCompatibility(first: MatchingStudent, second: MatchingStudent) {
+export type CompatibilityReason = {
+  key: string; label: string; summary: string; value: number; weight: number;
+  assessment: "good" | "difference" | "neutral" | "unknown";
+};
+
+/** The score and the explanation use the same component values and weights. */
+export function compatibilityBreakdown(first: MatchingStudent, second: MatchingStudent): CompatibilityReason[] {
   const preferenceSimilarity = (preference: "tidiness" | "ventilation" | "temperature", a: number, b: number, range: number) =>
     first.flexible_preferences?.includes(preference) || second.flexible_preferences?.includes(preference) ? 1 : similarity(a, b, range);
   const showerConflict = showerOverlapMinutes(first, second) / Math.min(first.shower_duration_minutes ?? 15, second.shower_duration_minutes ?? 15);
   const noise = 1 - (disturbance(first.environment_answers?.version ? 1 : first.night_noise_activity, second.noise_sensitivity) + disturbance(second.environment_answers?.version ? 1 : second.night_noise_activity, first.noise_sensitivity)) / 2;
   const light = first.environment_answers?.version && second.environment_answers?.version ? similarity(first.light_sensitivity, second.light_sensitivity, 4) : 1 - (disturbance(first.environment_answers?.version ? 1 : first.night_light_usage, second.light_sensitivity) + disturbance(second.environment_answers?.version ? 1 : second.night_light_usage, first.light_sensitivity)) / 2;
   const alarm = 1 - (alarmDisturbance(first.environment_answers?.version ? {...first,alarm_repeats:0} : first, second) + alarmDisturbance(second.environment_answers?.version ? {...second,alarm_repeats:0} : second, first)) / 2;
-  const environment = first.environment_answers?.version || second.environment_answers?.version ? (["humidity", "summer_ac", "winter_heater"] as const).reduce((sum, key) => {
-    const a = first.environment_answers?.[key]; const b = second.environment_answers?.[key];
-    return sum + (a == null || b == null || a === 0 || b === 0 ? 1 : similarity(a,b,2));
-  }, 0) : 0;
-  return similarity(circularTimeDifference(first.wake_time, second.wake_time), 0, 180) * 1.2
-    + similarity(circularTimeDifference(first.sleep_time, second.sleep_time), 0, 240) * 1.4
-    + preferenceSimilarity("tidiness", first.tidiness, second.tidiness, 4) * 1.1
-    + preferenceSimilarity("temperature", first.preferred_temperature, second.preferred_temperature, 8) * 0.8
-    + preferenceSimilarity("ventilation", first.ventilation_preference, second.ventilation_preference, 4) * 0.8
-    + noise * 1.8 + light * 1.4 + alarm * 1.0 + (1 - showerConflict) * 2.0 + environment;
+  function reason(key: string, label: string, summary: string, value: number, weight: number,
+    assessment?: CompatibilityReason["assessment"]): CompatibilityReason {
+    const unknown = first.is_default || second.is_default || first.auto_filled_fields?.includes(key) || second.auto_filled_fields?.includes(key);
+    return { key, label, summary: unknown ? summary + " · 기본값 포함" : summary, value, weight,
+      assessment: unknown ? "unknown" : assessment ?? (value >= 0.75 ? "good" : "difference") };
+  }
+  const preference = (key: "tidiness" | "ventilation" | "temperature", label: string, a: number, b: number, range: number, detail: string) => {
+    const flexible = first.flexible_preferences?.includes(key) || second.flexible_preferences?.includes(key);
+    return reason(key, label, flexible ? "한쪽 이상이 상관없음 선택 · 감점 없음" : detail,
+      preferenceSimilarity(key, a, b, range), key === "tidiness" ? 1.1 : 0.8, flexible ? "neutral" : undefined);
+  };
+  const newNoise = !!first.environment_answers?.version && !!second.environment_answers?.version;
+  const results = [
+    reason("wake_time", "기상 시간", `기상 시간 차이 ${circularTimeDifference(first.wake_time, second.wake_time)}분`, similarity(circularTimeDifference(first.wake_time, second.wake_time), 0, 180), 1.2),
+    reason("sleep_time", "취침 시간", `취침 시간 차이 ${circularTimeDifference(first.sleep_time, second.sleep_time)}분`, similarity(circularTimeDifference(first.sleep_time, second.sleep_time), 0, 240), 1.4),
+    preference("tidiness", "청결 기준", first.tidiness, second.tidiness, 4, Math.abs(first.tidiness - second.tidiness) <= 1 ? "청결 기준이 비슷함" : `청결 기준 ${Math.abs(first.tidiness - second.tidiness)}단계 차이`),
+    preference("temperature", "실내 온도", first.preferred_temperature, second.preferred_temperature, 8, `선호 온도 차이 ${Math.abs(first.preferred_temperature - second.preferred_temperature)}℃`),
+    preference("ventilation", "창문·환기", first.ventilation_preference, second.ventilation_preference, 4, Math.abs(first.ventilation_preference - second.ventilation_preference) <= 1 ? "창문·환기 선호가 비슷함" : "창문·환기 선호에 차이가 있음"),
+    reason("noise", "수면 중 소음", newNoise ? "야간 소음 행동을 묻지 않아 충돌 여부는 평가하지 않음" : "이전 설문의 야간 소음 행동과 상대의 민감도를 비교", noise, 1.8, newNoise || first.night_noise_activity == null || second.night_noise_activity == null ? "unknown" : undefined),
+    reason("light", "수면 중 조명", newNoise ? first.light_sensitivity === second.light_sensitivity ? "큰 불·작은 불 사용 기준이 같음" : "큰 불·작은 불 사용 기준에 차이가 있음" : "이전 설문의 야간 조명 사용과 상대의 민감도를 비교", light, 1.4, !newNoise && (first.night_light_usage == null || second.night_light_usage == null) ? "unknown" : undefined),
+    reason("alarm", "이전 알람 응답", newNoise ? "현재 설문에서는 알람 반복을 묻지 않아 감점하지 않음" : "이전 알람 반복 응답과 상대 수면 시간의 충돌을 비교", alarm, 1, newNoise || first.alarm_repeats == null || second.alarm_repeats == null ? "unknown" : undefined),
+    reason("shower_duration_minutes", "샤워 사용", showerOverlapMinutes(first, second) ? `샤워 사용 시간이 ${showerOverlapMinutes(first, second)}분 겹침` : "샤워 사용 시간이 겹치지 않음", 1 - showerConflict, 2,
+      first.shower_duration_minutes == null || second.shower_duration_minutes == null ? "unknown" : showerConflict > 0 ? "difference" : "good"),
+  ];
+  if (first.environment_answers?.version || second.environment_answers?.version) {
+    for (const [key, label] of [["humidity", "습도"], ["summer_ac", "여름 에어컨"], ["winter_heater", "겨울 히터"]] as const) {
+      const a = first.environment_answers?.[key]; const b = second.environment_answers?.[key];
+      const unknown = a == null || b == null || first.auto_filled_fields?.includes(key) || second.auto_filled_fields?.includes(key);
+      const flexible = a === 0 || b === 0;
+      results.push(reason(key, label, unknown ? "미응답·자동 보완 값 포함 · 감점 없음" : flexible ? "한쪽 이상이 상관없음 선택 · 감점 없음" : a === b ? `${label} 선호가 같음` : `${label} 선호에 차이가 있음`,
+        unknown || flexible ? 1 : similarity(a!, b!, 2), 1, unknown ? "unknown" : flexible ? "neutral" : a === b ? "good" : "difference"));
+    }
+  }
+  return results;
+}
+
+export function roommateCompatibility(first: MatchingStudent, second: MatchingStudent) {
+  return compatibilityBreakdown(first, second).reduce((sum, reason) => sum + reason.value * reason.weight, 0);
+}
+
+export function explainRoommates(first: MatchingStudent, second: MatchingStudent) {
+  const reasons = compatibilityBreakdown(first, second);
+  return { score: roomCompatibilityScore([first, second])!, reasons };
 }
 
 export function matchRoommates<T extends MatchingStudent>(students: T[], roomCapacity: number) {
@@ -121,7 +160,7 @@ export function roomCompatibilityScore<T extends MatchingStudent>(students: T[])
       pairs += 1;
     });
   });
-  // Each component is in [0, 1]; the weights sum to 11.5.
+  // Normalize each pair using its actual legacy/new-survey weight total.
   return Math.round(Math.max(0, Math.min(10, total / pairs * 10)) * 10) / 10;
 }
 

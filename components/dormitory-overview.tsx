@@ -6,7 +6,8 @@ import { useAdminSession } from "./admin-session";
 import { Icon } from "./icon";
 import { supabase } from "@/lib/supabase/client";
 import { useAdminRealtime } from "@/lib/supabase/use-admin-realtime";
-import { buildDormitoryView, type SeparationRequest } from "@/lib/dormitory-view";
+import { buildDormitoryView, type SeparationRequest, type FinalAssignment } from "@/lib/dormitory-view";
+import { RoomReasons } from "./room-reasons";
 import { gridFromLegacyFloor, type DormLayout, type ManualAssignment } from "@/lib/dormitory-layout";
 import { spaceNames } from "@/lib/floor-grid";
 import type { SurveyRow } from "@/lib/student-roster";
@@ -15,7 +16,7 @@ import { hasDetailedHabits } from "@/lib/roommate-matching";
 type Snapshot = {
   surveys: SurveyRow[]; avoidance_requests?: SeparationRequest[];
   school: { class_count: number; students_per_class: number; room_capacity: number };
-  management: { layout: DormLayout | null; manual_assignments: ManualAssignment[]; include_defaults: boolean };
+  management: { layout: DormLayout | null; manual_assignments: ManualAssignment[]; include_defaults: boolean; final_assignment?: FinalAssignment | null };
 };
 
 export function DormitoryOverview() {
@@ -72,7 +73,7 @@ export function DormitoryOverview() {
     layout: current.management.layout,
     manualAssignments: current.management.manual_assignments ?? [],
     includeDefaults: current.management.include_defaults,
-    testEnabled, avoidanceRequests: current.avoidance_requests,
+    testEnabled, avoidanceRequests: current.avoidance_requests, finalAssignment: current.management.final_assignment,
   }) : null, [current, testEnabled]);
   const view = isAuthenticated ? privateView : publicView;
 
@@ -88,9 +89,10 @@ export function DormitoryOverview() {
   const buildingRooms = building ? rooms.filter(room=>room.id.startsWith(building.id+"/")) : [];
 
   return <section className="overview" aria-labelledby="overview-title">
-    <div className="overview-title"><div><h2 id="overview-title">현재 방 배치</h2><span className="overview-sync" role="status" aria-label="대시보드 동기화 상태">{error ? "연결 확인 필요" : syncState === "connected" ? "실시간 연결됨" : syncState === "connecting" ? "연결 중" : "연결 복구 중"}{updatedAt && ` · ${updatedAt}`}</span></div><div className="overview-controls"><span className="overview-mode">{testEnabled ? "테스트 포함" : "실제 운영"}{current?.management.include_defaults ? " · 미응답 포함" : ""}</span><button type="button" className="secondary-button" disabled={loading} onClick={() => void refresh()}>{loading ? "불러오는 중" : "새로고침"}</button></div></div>
+    <div className="overview-title"><div><h2 id="overview-title">현재 방 배치</h2><span className="overview-sync" role="status" aria-label="대시보드 동기화 상태">{error ? "연결 확인 필요" : syncState === "connected" ? "실시간 연결됨" : syncState === "connecting" ? "연결 중" : "연결 복구 중"}{updatedAt && ` · ${updatedAt}`}</span></div><div className="overview-controls"><span className="overview-mode">{view?.finalizedAt ? "최종 확정" : testEnabled ? "테스트 포함" : "실제 운영"}{current?.management.include_defaults ? " · 미응답 포함" : ""}</span><button type="button" className="secondary-button" disabled={loading} onClick={() => void refresh()}>{loading ? "불러오는 중" : "새로고침"}</button></div></div>
     {error && <p className="notice error" role="alert">{error}{view && " 아래에는 마지막으로 불러온 배정이 표시됩니다."}</p>}
     {!view ? <p className="overview-loading" role="status">{error ? "배정 정보를 확인할 수 없습니다." : "배정 정보를 불러오는 중입니다."}</p> : <>
+      <p className="overview-final-state">{view.finalizedAt ? "최종 확정 배정 · " + new Date(view.finalizedAt).toLocaleString("ko-KR", {timeZone:"Asia/Seoul"}) : "현재 임시 배정"} · <Link href="/result">내 점수와 선정 이유 확인</Link></p>
       <div className="overview-metrics" aria-label="현재 배정 요약">
         <article><span>설문 접수</span><strong>{view.roster.receivedStudents.length}<small>명</small></strong><p>전체 명단 {view.schoolRosterSize}명</p></article>
         <article><span>배정 인원</span><strong>{view.assignedCount}<small>명</small></strong><p>{view.occupiedRooms}개 호실 사용 중</p></article>
@@ -111,12 +113,13 @@ export function DormitoryOverview() {
           return <section key={floor.id} className="overview-floor" aria-label={`${building.name} ${floor.floor}층 전체 호실`}>
             <header><h3>{floor.floor}층</h3><span>{floorRooms.length}개 방 · {floorRooms.reduce((sum,room)=>sum+room.students.length,0)}/{floorRooms.reduce((sum,room)=>sum+room.capacity,0)}명</span><small>{facilities.join(" · ")}</small></header>
             <div className="overview-room-rows" role="group" aria-label={`${floor.floor}층 호실 2행 목록`}>{wings.map((wing,index)=><div className="overview-room-row" key={index} style={{minWidth:rowWidth}}><h4>{index===0?"왼쪽 구역":"오른쪽 구역"}</h4><div className="overview-room-track" style={{gridTemplateColumns:`repeat(${Math.max(1,...wings.map(wing=>wing.length))}, minmax(100px,1fr))`}}>{wing.map(room=><div key={room.id} className="overview-room-item"><button type="button" className={`overview-room${room.students.length?" occupied":""}`} aria-expanded={selectedRooms[floor.id]===room.id} aria-controls={`detail-${floor.id}`} aria-label={`${room.number}호 · ${room.grade}학년 · ${room.students.length}/${room.capacity}명`} onClick={()=>setSelectedRooms(previous=>({...previous,[floor.id]:previous[floor.id]===room.id?"":room.id}))}><strong>{room.number}호</strong><span>{room.grade}학년</span><span>{room.students.length}/{room.capacity}명</span><span aria-hidden="true">{selectedRooms[floor.id]===room.id?"−":"＋"}</span></button></div>)}{!wing.length&&<p className="overview-row-empty">호실 없음</p>}</div></div>)}</div>
-            {selectedRoom&&<div id={`detail-${floor.id}`}><section className="overview-room-detail" aria-label={`${selectedRoom.number}호 입실 정보`}><div className="overview-room-detail-title"><h3>{building.name} {selectedRoom.number}호</h3><span>{selectedRoom.grade}학년 · {selectedRoom.capacity}인실</span><span className="overview-score">{selectedRoom.score === null ? "평가 대기" : `${selectedRoom.students.some(student => student.is_default || !hasDetailedHabits(student)) ? "임시 적합도" : "적합도"} ${selectedRoom.score.toFixed(1)} / 10`}</span></div><ol>{selectedRoom.beds.map((student, index) => <li key={index}><span className="overview-bed-number">{index + 1}</span>{student ? <div><strong>{student.student_name}</strong><small>{student.student_id}{student.is_test ? " · 테스트" : student.is_default ? " · 미응답" : ""}</small></div> : <span className="overview-empty-bed">빈자리</span>}</li>)}</ol></section></div>}
+            {selectedRoom&&<div id={`detail-${floor.id}`}><section className="overview-room-detail" aria-label={`${selectedRoom.number}호 입실 정보`}><div className="overview-room-detail-title"><h3>{building.name} {selectedRoom.number}호</h3><span>{selectedRoom.grade}학년 · {selectedRoom.capacity}인실</span><span className="overview-score">{selectedRoom.score === null ? "평가 대기" : `${view.finalizedAt ? "확정 적합도" : isAuthenticated && selectedRoom.students.some(student => student.is_default || !hasDetailedHabits(student)) ? "참고 적합도" : "적합도"} ${selectedRoom.score.toFixed(1)} / 10`}</span></div><ol>{selectedRoom.beds.map((student, index) => <li key={index}><span className="overview-bed-number">{index + 1}</span>{student ? <div><strong>{student.student_name}</strong><small>{student.student_id}{student.is_test ? " · 테스트" : student.is_default ? " · 미응답" : ""}</small></div> : <span className="overview-empty-bed">빈자리</span>}</li>)}</ol></section></div>}
 
           </section>;
         })}
       </div>
-      <p className="overview-footnote">새 설문이 접수되면 자동 배정은 달라질 수 있습니다. 수동으로 고정한 자리는 유지됩니다.</p>
+      {isAuthenticated && floors.map(floor => { const room = rooms.find(room => room.id === selectedRooms[floor.id]); return room ? <section className="overview-private-reasons" key={room.id}><h3>{room.number}호 선정 이유</h3><RoomReasons students={room.students} /></section> : null; })}
+      <p className="overview-footnote">{view.finalizedAt ? "확정 당시 배치와 점수입니다. 새 설문은 보관되며, 관리자가 확정을 해제해야 배정에 반영됩니다." : "새 설문이 접수되면 자동 배정은 달라질 수 있습니다. 수동으로 고정한 자리는 유지됩니다."}</p>
     </>}
   </section>;
 }

@@ -6,6 +6,8 @@ begin
  update public.dormitory_settings set class_count=9,students_per_class=30 where id=true;
  perform public.submit_student_survey(p||'{"student_id":"1929","student_name":"검증상대","avoidance_requests":[]}'::jsonb);
  select survey_id into sid from public.submit_student_survey(p);
+ perform public.set_student_gender_by_key('12345','1930','__환경검증__','male',(select placement_revision from public.dormitory_management where id=true));
+ perform public.set_student_gender_by_key('12345','1929','검증상대','male',(select placement_revision from public.dormitory_management where id=true));
  select id into r from public.room_separation_requests where survey_id=sid;
  if r is null then raise exception '요청 저장 실패';end if;
  if (select environment_answers->>'summer_ac' from public.student_surveys where id=sid)<>'2' then raise exception '환경 저장 실패';end if;

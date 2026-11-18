@@ -6,6 +6,8 @@ begin
  update public.dormitory_settings set class_count=9,students_per_class=30 where id=true;
  perform public.submit_student_survey(p||'{"student_id":"1929","student_name":"검증상대","avoidance_requests":[]}'::jsonb);
  select survey_id into sid from public.submit_student_survey(p);
+ perform public.set_student_gender_by_key('12345','1930','__검토정리검증__','male',(select placement_revision from public.dormitory_management where id=true));
+ perform public.set_student_gender_by_key('12345','1929','검증상대','male',(select placement_revision from public.dormitory_management where id=true));
  if (select shower_duration_minutes<>15 or cardinality(auto_filled_fields)<>4 from public.student_surveys where id=sid) then raise exception '기본값 보완 실패';end if;
  select updated_at into before_time from public.student_surveys where id=sid;
  update public.student_surveys set environment_answers=environment_answers where id=sid;

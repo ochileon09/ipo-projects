@@ -1,15 +1,27 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { roomCompatibilityScore, optimizeRoomAssignments } = require('../.codex_tmp/matching-tests/roommate-matching.js');
-const { createDefaultLayout, allocateDormitory, newFloor, validateLayout } = require('../.codex_tmp/matching-tests/dormitory-layout.js');
-const { selectRoster, createDefaultRoster } = require('../.codex_tmp/matching-tests/student-roster.js');
+const { createDefaultLayout: rawDefaultLayout, allocateDormitory: strictAllocate, newFloor, validateLayout } = require('../.codex_tmp/matching-tests/dormitory-layout.js');
+const { selectRoster, createDefaultRoster: rawDefaultRoster, applyGenderProfiles } = require('../.codex_tmp/matching-tests/student-roster.js');
 const { createFloorGrid, expandSelection, paintGrid, mergeGrid, splitGrid, moveGridSpace, validateFloorGrid } = require('../.codex_tmp/matching-tests/floor-grid.js');
 const { floorRooms, gridFromLegacyFloor } = require('../.codex_tmp/matching-tests/dormitory-layout.js');
 const { planManualMove } = require('../.codex_tmp/matching-tests/dormitory-layout.js');
 const { roommateCompatibility, showerOverlapMinutes, hasDetailedHabits } = require('../.codex_tmp/matching-tests/roommate-matching.js');
-const { buildDormitoryView } = require('../.codex_tmp/matching-tests/dormitory-view.js');
+const { buildDormitoryView: strictView, waitingReason } = require('../.codex_tmp/matching-tests/dormitory-view.js');
 const { compatibilityBreakdown } = require('../.codex_tmp/matching-tests/roommate-matching.js');
 const { studentAssignmentResult } = require('../.codex_tmp/matching-tests/student-result.js');
+
+// Existing regression scenarios use an explicitly verified, single-gender fictional school.
+// Gender-specific scenarios below call the strict production functions without these fixtures.
+const configured = layout => layout.map(building=>({...building,genderPolicy:building.genderPolicy??'male'}));
+const createDefaultLayout = (...args) => configured(rawDefaultLayout(...args));
+const createDefaultRoster = (...args) => rawDefaultRoster(...args).map(row=>({...row,gender:'male',gender_verified:true,reported_gender:'male'}));
+const allocateDormitory = (students,layout,pins) => strictAllocate(students,configured(layout),pins);
+function buildDormitoryView(input) {
+  const school=input.finalAssignment?.school??input.school;
+  const genderProfiles=rawDefaultRoster(school.classCount,school.studentsPerClass).map(row=>({student_id:row.student_id,student_name:input.surveys.find(s=>!s.is_test&&s.student_id===row.student_id)?.student_name??'학생'+row.student_id,gender:'male',verified:true,checked_reported_gender:'male'}));
+  return strictView({...input,layout:configured(input.layout??rawDefaultLayout(school.classCount*school.studentsPerClass,school.roomCapacity)),genderProfiles});
+}
 
 function student(studentId, overrides = {}) {
   return { ...createDefaultRoster(6, 16).find(row => row.student_id === studentId), id: studentId, is_default: false, student_name: '학생' + studentId, created_at: '2026-10-01T00:00:00Z', shower_duration_minutes:10,night_noise_activity:1,night_light_usage:1,alarm_repeats:0,...overrides };
@@ -451,4 +463,119 @@ test('a response arriving for an already reserved default seat retains that seat
   const ambiguous=buildDormitoryView({...input,surveys:[student('2101'),student('2102'),student('2102',{id:'other',student_name:'다른 이름'})],finalAssignment});
   const result=studentAssignmentResult(ambiguous,'2102','학생2102');
   assert(!result.assigned);assert(result.message.includes('서로 다른 이름'));
+});
+
+function genderLayout(capacity=2) {
+  return [{id:'g',name:'성별 검증동',diningSide:'none',provisional:true,genderPolicy:'separate',floors:[
+    {...newFloor(2,2,capacity),leftRooms:2,rightRooms:2,leftGender:'male',rightGender:'female'},
+    {...newFloor(1,1,capacity),leftRooms:1,rightRooms:1,leftGender:'male',rightGender:'female'},
+    {...newFloor(3,3,capacity),leftRooms:1,rightRooms:1,leftGender:'male',rightGender:'female'},
+  ]}];
+}
+const female=id=>student(id,{gender:'female',reported_gender:'female'});
+const unknown=id=>student(id,{gender:'unknown',gender_verified:false,reported_gender:'unknown'});
+const profile=(id,gender,name='학생'+id)=>({student_id:id,student_name:name,gender,verified:gender!=='unknown',checked_reported_gender:gender});
+const genderInput=(surveys,genderProfiles=[],extra={})=>({surveys,genderProfiles,school:{classCount:1,studentsPerClass:8,roomCapacity:2},layout:genderLayout(),manualAssignments:[],includeDefaults:false,testEnabled:false,...extra});
+
+test('strict auto allocation enforces grade, verified gender, capacity and approved exclusions together',()=>{
+  const people=[student('1101'),female('1102'),student('2101',{avoid_with:['2102']}),student('2102'),female('2103'),female('2104'),student('3101'),female('3102'),unknown('2105')];
+  const result=strictAllocate(people,genderLayout());
+  assert.deepEqual(result.waiting.map(s=>s.student_id),['2105']);
+  assert.equal(result.rooms.flatMap(r=>r.students).length,8);
+  for(const r of result.rooms) {
+    assert(r.students.every(s=>s.grade===r.grade&&s.gender===r.gender&&s.gender_verified));
+    assert(r.students.length<=r.capacity);
+    assert(!(r.students.some(s=>s.student_id==='2101')&&r.students.some(s=>s.student_id==='2102')));
+  }
+});
+
+test('unknown actual, default and reported-only gender students wait even with spare beds',()=>{
+  const people=[unknown('2101'),student('2102',{gender_verified:false}),...rawDefaultRoster(1,1)];
+  const result=strictAllocate(people,genderLayout());
+  assert.equal(result.rooms.flatMap(r=>r.students).length,0);assert.equal(result.waiting.length,5);
+  const view=strictView(genderInput([student('2101')]));
+  assert.equal(view.assignedCount,0);assert.equal(view.genderWaitingCount,1);
+  assert.equal(waitingReason(view.allocation.waiting[0],view),'성별 확인 대기');
+  assert.equal(studentAssignmentResult(view,'2101','학생2101').assigned,false);
+});
+
+test('a roster profile must match identity and unreviewed conflicting reports suspend allocation',()=>{
+  const original=student('2101');const p=profile('2101','male');
+  assert.equal(applyGenderProfiles([original],[p],new Set())[0].gender,'male');
+  assert.equal(applyGenderProfiles([original],[{...p,student_name:'다른 사람'}],new Set())[0].gender,'unknown');
+  assert.equal(applyGenderProfiles([original],[p],new Set(['2101']))[0].gender,'unknown');
+  const changed={...original,reported_gender:'female'};
+  assert.equal(applyGenderProfiles([changed],[p],new Set())[0].gender,'unknown');
+  assert.equal(applyGenderProfiles([changed],[{...p,checked_reported_gender:'female'}],new Set())[0].gender,'male');
+  assert.equal(applyGenderProfiles([{...original,reported_gender:'unknown'}],[p],new Set())[0].gender,'male');
+});
+
+test('real unknown responses beat known virtual copies; only verified unsurveyed roster entries use default habits',()=>{
+  const actual=unknown('2101');const fake=student('2101',{is_test:true,id:'fake',reported_gender:'female'});
+  const view=strictView(genderInput([actual,fake],[],{testEnabled:true}));
+  assert.equal(view.roster.activeStudents[0].id,actual.id);assert.equal(view.assignedCount,0);
+  const defaults=strictView(genderInput([], [profile('2102','female','명단확인학생')],{includeDefaults:true}));
+  assert.equal(defaults.assignedCount,1);assert.equal(defaults.genderWaitingCount,23);
+  const member=defaults.allocation.rooms.flatMap(r=>r.students)[0];
+  assert.equal(member.student_name,'명단확인학생');assert(member.is_default);assert.equal(member.sleep_time,'00:30:00');
+});
+
+test('manual move rejects opposite-gender empty beds and swaps, accepts compatible moves and preserves exclusions',()=>{
+  const people=[student('2101'),student('2102'),female('2103'),female('2104')];
+  const base=strictAllocate(people,genderLayout());
+  const wrong=base.rooms.find(r=>r.grade===2&&r.gender==='female'&&r.students.length===0);
+  assert.throws(()=>planManualMove(base.rooms,[],'2101',{roomId:wrong.id,bedIndex:0}),/성별/);
+  const occupied=base.rooms.find(r=>r.students.some(s=>s.student_id==='2103'));
+  assert.throws(()=>planManualMove(base.rooms,[],'2101',{roomId:occupied.id,bedIndex:0}),/성별/);
+  const free=base.rooms.find(r=>r.grade===2&&r.gender==='male'&&!r.students.length);
+  const pins=planManualMove(base.rooms,[],'2101',{roomId:free.id,bedIndex:1});
+  assert.deepEqual(location(strictAllocate(people,genderLayout(),pins),'2101'),{roomId:free.id,bedIndex:1});
+  const tampered=structuredClone(base.rooms);const destination=tampered.find(r=>r.id===free.id);
+  destination.beds[0]=female('2105');destination.students=[destination.beds[0]];
+  assert.throws(()=>planManualMove(tampered,[],'2101',{roomId:free.id,bedIndex:0}),/교환 상대/);
+});
+
+test('stale or malicious manual pins cannot put an unknown or opposite gender in a room',()=>{
+  const base=strictAllocate([],genderLayout());const male=base.rooms.find(r=>r.grade===2&&r.gender==='male');
+  const result=strictAllocate([student('2101'),female('2102'),unknown('2103')],genderLayout(),[
+    {studentId:'2102',roomId:male.id,bedIndex:1},{studentId:'2103',roomId:male.id,bedIndex:0}]);
+  assert.equal(result.invalidManual.length,1);assert.equal(result.inactiveManual.length,1);
+  assert(result.rooms.every(r=>r.students.every(s=>s.gender===r.gender)));assert.equal(result.waiting.length,1);
+});
+
+test('gender capacity reports shortages independently of total spare spaces and excludes unconfigured rooms',()=>{
+  const people=['2101','2102','2103'].map(id=>student(id));
+  const layout=genderLayout(1);const view=strictView(genderInput(people,people.map(s=>profile(s.student_id,'male')),{layout}));
+  const group=view.genderCapacity.find(g=>g.grade===2&&g.gender==='male');
+  assert.equal(group.shortage,1);assert.equal(group.waiting,1);assert(view.totalBeds>view.assignedCount);
+  assert.match(waitingReason(view.allocation.waiting[0],view),/자리 부족/);
+  const unset=strictView(genderInput(people,people.map(s=>profile(s.student_id,'male')),{layout:rawDefaultLayout(8,2)}));
+  assert.equal(unset.assignedCount,0);assert.equal(unset.unconfiguredBeds,unset.totalBeds);
+  assert.match(waitingReason(unset.allocation.waiting[0],unset),/호실 성별/);
+});
+
+test('building/floor/room gender inheritance survives grid conversion and movement; conflicting policies are invalid',()=>{
+  const layout=genderLayout();assert.equal(validateLayout(layout),null);
+  const before=strictAllocate([student('2101'),female('2102')],layout);
+  const converted=structuredClone(layout);converted[0].floors[0].grid=gridFromLegacyFloor(converted[0].floors[0]);
+  assert.deepEqual(strictAllocate([student('2101'),female('2102')],converted).rooms,before.rooms);
+  const bad=structuredClone(layout);bad[0].genderPolicy='male';assert.match(validateLayout(bad),/성별/);
+  const inherited=structuredClone(layout);inherited[0].genderPolicy='female';inherited[0].floors.forEach(f=>{f.leftGender='inherit';f.rightGender='inherit';});
+  assert(strictAllocate([],inherited).rooms.every(r=>r.gender==='female'));
+  const room=converted[0].floors[0].grid.spaces.find(s=>s.kind==='room'&&s.genderPolicy==='male');
+  const moved=moveGridSpace(converted[0].floors[0].grid,room.id,2,1);
+  assert.equal(moved.spaces.find(s=>s.id===room.id).genderPolicy,'male');
+});
+
+test('verified final snapshots keep beds after ordinary edits, wait new unknown students and retain legacy originals',()=>{
+  const profiles=[profile('2101','male'),profile('2102','male')];
+  const input=genderInput([student('2101'),student('2102')],profiles);const initial=strictView(input);
+  const final={id:'g-final',confirmed_at:'2026-11-18T01:00:00Z',source_revision:2,gender_policy_version:1,school:input.school,layout:input.layout,rooms:structuredClone(initial.allocation.rooms)};
+  const frozen=strictView({...input,surveys:[student('2101',{sleep_time:'04:00'}),student('2102'),unknown('2103')],finalAssignment:final});
+  assert.deepEqual(frozen.allocation.rooms,initial.allocation.rooms);assert.equal(frozen.genderReviewRequired,false);assert.equal(frozen.genderWaitingCount,1);
+  const conflicting=strictView({...input,surveys:[student('2101',{reported_gender:'female'}),student('2102')],finalAssignment:final});
+  assert.equal(conflicting.genderReviewRequired,true);assert.equal(conflicting.assignedCount,1);
+  const archived=structuredClone(final);delete archived.gender_policy_version;archived.rooms.forEach(r=>r.students.forEach(s=>{delete s.gender;delete s.gender_verified;}));
+  const original=JSON.stringify(archived);const legacy=strictView({...input,finalAssignment:archived});
+  assert.equal(legacy.assignedCount,0);assert(legacy.genderReviewRequired);assert.equal(JSON.stringify(archived),original);
 });

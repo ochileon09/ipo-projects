@@ -1,7 +1,10 @@
+import { genderPolicies, type GenderPolicy } from "./gender";
+
 export type SpaceKind = "room" | "corridor" | "stairs" | "laundry" | "dryer" | "lounge" | "outside";
 export type GridSpace = {
   id: string; kind: SpaceKind; row: number; col: number; rowSpan: number; colSpan: number;
   number?: string; grade?: 1 | 2 | 3; capacity?: number;
+  genderPolicy?: GenderPolicy;
 };
 export type FloorGrid = { rows: number; cols: number; spaces: GridSpace[] };
 export type GridSelection = { top: number; left: number; bottom: number; right: number };
@@ -33,7 +36,7 @@ function roomNumber(used: Set<string>, floor: number) {
 }
 function converted(space: GridSpace, kind: SpaceKind, floor: number, grade: 1 | 2 | 3, capacity: number, used: Set<string>): GridSpace {
   const base = { id: space.id, kind, row: space.row, col: space.col, rowSpan: space.rowSpan, colSpan: space.colSpan };
-  return kind === "room" ? { ...base, number: space.kind === "room" ? space.number : roomNumber(used, floor), grade, capacity } : base;
+  return kind === "room" ? { ...base, number: space.kind === "room" ? space.number : roomNumber(used, floor), grade, capacity, genderPolicy: space.genderPolicy ?? "inherit" } : base;
 }
 export function createFloorGrid(rows: number, cols: number, floor: number, grade: 1 | 2 | 3, capacity: number, fillRooms = true): FloorGrid {
   const spaces: GridSpace[] = []; const used = new Set<string>();
@@ -80,6 +83,7 @@ export function validateFloorGrid(grid: FloorGrid): string | null {
   for (const space of grid.spaces) {
     if (!space || typeof space.id !== "string" || !space.id || space.id.length > 100 || ids.has(space.id) || !Object.hasOwn(spaceNames, space.kind)) return "공간의 종류와 식별자를 확인해 주세요.";
     ids.add(space.id);
+    if (space.genderPolicy !== undefined && !genderPolicies.includes(space.genderPolicy)) return "호실의 성별 설정을 확인해 주세요.";
     if (![space.row,space.col,space.rowSpan,space.colSpan].every(Number.isInteger) || space.row < 0 || space.col < 0 || space.rowSpan < 1 || space.colSpan < 1 || space.row + space.rowSpan > grid.rows || space.col + space.colSpan > grid.cols) return "격자를 벗어나는 공간이 있습니다.";
     if (space.kind === "room" && (typeof space.number !== "string" || !space.number.trim() || space.number !== space.number.trim() || space.number.length > 12 || ![1,2,3].includes(space.grade!) || !Number.isInteger(space.capacity) || space.capacity! < 1 || space.capacity! > 6)) return "호실 번호(1~12자), 학년(1~3), 인실(1~6)을 확인해 주세요.";
     for (let row = space.row; row < space.row + space.rowSpan; row++) for (let col = space.col; col < space.col + space.colSpan; col++) {

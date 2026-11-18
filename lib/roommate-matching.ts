@@ -1,4 +1,9 @@
+import { verifiedGender, type Gender } from "./gender";
+
 export type MatchingStudent = {
+  gender?: Gender;
+  gender_verified?: boolean;
+  reported_gender?: Gender;
   is_test?: boolean;
   is_default?: boolean;
   student_id: string;
@@ -122,16 +127,17 @@ export function explainRoommates(first: MatchingStudent, second: MatchingStudent
 }
 
 export function matchRoommates<T extends MatchingStudent>(students: T[], roomCapacity: number) {
-  const waiting = [...students].sort((a, b) => a.student_id.localeCompare(b.student_id, "ko"));
+  const waiting = students.filter(student=>verifiedGender(student)!=="unknown").sort((a, b) => a.student_id.localeCompare(b.student_id, "ko"));
   const rooms: T[][] = [];
 
   while (waiting.length > 0) {
     const room = [waiting.shift()!];
     while (room.length < roomCapacity && waiting.length > 0) {
-      let bestIndex = 0;
+      let bestIndex = -1;
       let bestScore = Number.NEGATIVE_INFINITY;
 
       waiting.forEach((candidate, index) => {
+        if(!room.every(member=>canShareRoom(member,candidate)))return;
         const averageScore = room.reduce(
           (total, member) => total + roommateCompatibility(member, candidate),
           0,
@@ -142,6 +148,7 @@ export function matchRoommates<T extends MatchingStudent>(students: T[], roomCap
         }
       });
 
+      if(bestIndex<0)break;
       room.push(waiting.splice(bestIndex, 1)[0]);
     }
     rooms.push(room);
@@ -165,7 +172,8 @@ export function roomCompatibilityScore<T extends MatchingStudent>(students: T[])
 }
 
 export function canShareRoom(a: MatchingStudent, b: MatchingStudent) {
-  return !a.avoid_with?.includes(b.student_id) && !b.avoid_with?.includes(a.student_id);
+  return a.grade === b.grade && verifiedGender(a) !== "unknown" && verifiedGender(a) === verifiedGender(b)
+    && !a.avoid_with?.includes(b.student_id) && !b.avoid_with?.includes(a.student_id);
 }
 
 export function assignmentPriority(student: MatchingStudent) {
@@ -176,8 +184,9 @@ export function assignmentPriority(student: MatchingStudent) {
 export function optimizeRoomAssignments<T extends MatchingStudent>(students: T[], capacities: number[]) {
   const seatCount = capacities.reduce((sum, value) => sum + value, 0);
   const ordered = [...students].sort((a, b) => assignmentPriority(a) - assignmentPriority(b) || a.student_id.localeCompare(b.student_id));
-  const remaining = ordered.slice(0, seatCount);
-  const waiting = ordered.slice(seatCount);
+  const eligible = ordered.filter(student => verifiedGender(student) !== "unknown");
+  const remaining = eligible.slice(0, seatCount);
+  const waiting = [...ordered.filter(student => verifiedGender(student) === "unknown"), ...eligible.slice(seatCount)];
   const scoreCache = new Map<string, number>();
   function score(a: T, b: T) {
     const key = [a.student_id, b.student_id].sort().join(":");

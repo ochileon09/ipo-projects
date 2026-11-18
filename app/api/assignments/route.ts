@@ -13,6 +13,7 @@ export async function POST(request: Request) {
   const snapshot = data as DashboardSnapshot;
   if (snapshot.management.placement_revision !== body.expectedRevision) return NextResponse.json({ error: "새 설문이나 다른 관리자의 변경이 있습니다. 최신 배정표를 확인하고 다시 시도해 주세요." }, { status: 409 });
   const view = viewFromSnapshot(snapshot);
+  if (body.action === "confirm" && view.genderWaitingCount) return NextResponse.json({ error: "성별 미확인 학생을 확인한 뒤 최종 확정해 주세요." }, { status: 400 });
   if (body.action === "confirm" && !view.assignedCount) return NextResponse.json({ error: "배정된 학생이 있어야 확정할 수 있습니다." }, { status: 400 });
   const result = body.action === "confirm"
     ? await db.rpc("confirm_dormitory_assignment_by_key", { p_admin_key: body.adminKey, p_expected_revision: body.expectedRevision,

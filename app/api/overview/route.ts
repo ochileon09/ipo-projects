@@ -8,5 +8,7 @@ export async function GET() {
   const view=viewFromSnapshot(data as DashboardSnapshot);
   // Public visitors get occupancy only; identities, survey answers and request reasons stay private.
   const rooms=view.allocation.rooms.map(room=>({...room,students:room.students.map(()=>({student_name:"배정된 학생",student_id:""})),beds:room.beds.map(student=>student?{student_name:"배정된 학생",student_id:""}:null)}));
-  return NextResponse.json({...view,roster:{receivedStudents:Array(view.roster.receivedStudents.length).fill(null)},allocation:{rooms,waiting:[],validManual:[],inactiveManual:[],invalidManual:[]}},{headers:{"Cache-Control":"no-store"}});
+  return NextResponse.json({effectiveLayout:view.effectiveLayout,assignedCount:view.assignedCount,totalBeds:view.totalBeds,schoolRosterSize:view.schoolRosterSize,
+    occupiedRooms:view.occupiedRooms,waitingCount:view.waitingCount,finalizedAt:view.finalizedAt,genderReviewRequired:view.genderReviewRequired,
+    roster:{receivedStudents:Array(view.roster.receivedStudents.length).fill(null)},allocation:{rooms,waiting:[],validManual:[],inactiveManual:[],invalidManual:[]}},{headers:{"Cache-Control":"no-store"}});
 }

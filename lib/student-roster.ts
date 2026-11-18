@@ -1,4 +1,5 @@
 import type { MatchingStudent } from "./roommate-matching";
+import { verifiedGender, type GenderProfile } from "./gender";
 
 export type SurveyRow = MatchingStudent & {
   id: string; student_name: string; is_test: boolean; is_default: boolean; created_at: string;
@@ -40,4 +41,18 @@ export function conflictingStudentIds(students: SurveyRow[]) {
     values.add(student.student_name.trim());names.set(id,values);
   });
   return new Set([...names].filter(([,values])=>values.size>1).map(([id])=>id));
+}
+
+/** Gender is taken only from an explicitly verified roster, never from the name or ID. */
+export function applyGenderProfiles(students: SurveyRow[], profiles: GenderProfile[], conflicts: Set<string>): SurveyRow[] {
+  const byId = new Map(profiles.map(profile => [profile.student_id, profile]));
+  return students.map(student => {
+    if (student.is_test) return { ...student, gender: student.reported_gender ?? "unknown", gender_verified: student.reported_gender === "male" || student.reported_gender === "female" };
+    const profile = byId.get(student.student_id);
+    const identityMatches = !!profile && (student.is_default || profile.student_name === student.student_name);
+    const changedReport = !!profile && student.reported_gender && student.reported_gender !== "unknown" && student.reported_gender !== profile.gender && student.reported_gender !== profile.checked_reported_gender;
+    const gender = identityMatches && profile.verified && !conflicts.has(student.student_id) && !changedReport ? profile.gender : "unknown";
+    return { ...student, student_name: student.is_default && profile ? profile.student_name : student.student_name,
+      gender, gender_verified: verifiedGender({gender, gender_verified: true}) !== "unknown" };
+  });
 }

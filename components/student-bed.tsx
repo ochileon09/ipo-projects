@@ -4,6 +4,7 @@ import { createContext, useContext, useRef, useState, type ReactNode } from "rea
 import { createPortal } from "react-dom";
 import type { BedAddress } from "@/lib/dormitory-layout";
 import type { SurveyRow } from "@/lib/student-roster";
+import { verifiedGender, type Gender } from "@/lib/gender";
 
 type PlacementInteraction = {
   activeStudent: SurveyRow | null; selectedId: string | null; draggingId: string | null;
@@ -16,8 +17,8 @@ export function StudentPlacementProvider({ value, children }: { value: Placement
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 
-export function StudentBed({ roomId, roomNumber, grade, bedIndex, student }: {
-  roomId: string; roomNumber: string; grade: number; bedIndex: number; student: SurveyRow | null;
+export function StudentBed({ roomId, roomNumber, grade, roomGender, bedIndex, student }: {
+  roomId: string; roomNumber: string; grade: number; roomGender?:Gender; bedIndex: number; student: SurveyRow | null;
 }) {
   const actions = useContext(Context);
   const pointer = useRef<{ x: number; y: number; id: string; active: boolean } | null>(null);
@@ -25,7 +26,7 @@ export function StudentBed({ roomId, roomNumber, grade, bedIndex, student }: {
   const [ghost, setGhost] = useState<{ x: number; y: number } | null>(null);
   const target = { roomId, bedIndex };
   const address = JSON.stringify([roomId, bedIndex]);
-  const compatible = actions?.activeStudent?.grade === grade;
+  const compatible = !!actions?.activeStudent&&actions.activeStudent.grade === grade&&verifiedGender(actions.activeStudent)!=="unknown"&&verifiedGender(actions.activeStudent)===roomGender;
   function targetAt(x: number, y: number): BedAddress | null {
     const element = document.elementFromPoint(x, y)?.closest<HTMLElement>('.student-bed[data-room-id][data-bed-index]');
     return element ? { roomId: element.dataset.roomId!, bedIndex: Number(element.dataset.bedIndex) } : null;
@@ -43,7 +44,7 @@ export function StudentBed({ roomId, roomNumber, grade, bedIndex, student }: {
     data-room-id={roomId} data-bed-index={bedIndex} data-student-id={student?.student_id ?? ""}
     aria-label={`${roomNumber}호 ${bedIndex+1}번 침대 · ${student ? student.student_name+" "+student.student_id : "빈 자리"}`}
     aria-pressed={!!student && actions.selectedId === student.student_id}
-    disabled={actions.busy} draggable={false}
+    disabled={actions.busy||roomGender==="unknown"} draggable={false}
     title={student ? "드래그하거나 클릭해 옮길 학생을 선택하세요." : "학생을 놓거나 선택한 학생을 이 자리로 옮기세요."}
     onClick={() => { if (!suppressClick.current) actions.select(target); }}
     onDragStart={event => event.preventDefault()}

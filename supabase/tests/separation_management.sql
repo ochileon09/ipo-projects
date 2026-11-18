@@ -15,6 +15,8 @@ begin
  select survey_id into duplicate_id from public.submit_student_survey(p||'{"student_id":"1929","student_name":"__충돌검증__","avoidance_requests":[]}'::jsonb);
  begin perform public.review_room_separation('12345',r,true);raise exception '중복 학번 승인';exception when sqlstate '22023' then null;end;
  update public.student_surveys set deleted_at=clock_timestamp() where id=duplicate_id;
+ perform public.set_student_gender_by_key('12345','1930','__대상검증__','male',(select placement_revision from public.dormitory_management where id=true));
+ perform public.set_student_gender_by_key('12345','1929','__상대검증__','male',(select placement_revision from public.dormitory_management where id=true));
  perform public.review_room_separation('12345',r,true);
  if exists(select 1 from public.room_separation_requests where id=r) then raise exception '처리된 신청 남음';end if;
  if not exists(select 1 from jsonb_array_elements(public.get_dormitory_dashboard_by_key('12345')->'separation_conditions') x where x->>'id'=r::text and (x->>'active')::boolean) then raise exception '조건 목록 누락';end if;

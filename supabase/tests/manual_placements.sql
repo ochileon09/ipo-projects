@@ -10,6 +10,13 @@ begin
   count_rooms:=(select count(*) from public.roomfit_assignable_rooms());
   if count_rooms<>144 then raise exception 'Default room count mismatch'; end if;
   if not exists(select 1 from public.roomfit_assignable_rooms() where room_id='a/floor-3/right/0' and grade=2 and capacity=2) then raise exception 'Default grade zoning mismatch'; end if;
+  update public.student_surveys set deleted_at=clock_timestamp() where not is_test_data and deleted_at is null;
+  delete from public.student_surveys where is_test_data;
+  update public.dormitory_management set include_defaults=true,test_enabled=false where id=true;
+  perform public.save_dormitory_layout_by_key('12345','[{"id":"a","name":"가상A","diningSide":"none","genderPolicy":"male","floors":[{"id":"floor-3","floor":3,"grid":{"rows":1,"cols":1,"spaces":[{"id":"right/0","kind":"room","number":"301","grade":2,"capacity":2,"row":0,"col":0,"rowSpan":1,"colSpan":1}]}}]},{"id":"b","name":"가상B","diningSide":"none","genderPolicy":"male","floors":[{"id":"floor-2","floor":2,"grid":{"rows":1,"cols":1,"spaces":[{"id":"left/0","kind":"room","number":"201","grade":1,"capacity":2,"row":0,"col":0,"rowSpan":1,"colSpan":1}]}}]}]');
+  perform public.set_student_gender_by_key('12345','2101','__manual_A__','male',(select placement_revision from public.dormitory_management where id=true));
+  perform public.set_student_gender_by_key('12345','2102','__manual_B__','male',(select placement_revision from public.dormitory_management where id=true));
+  d:=public.get_dormitory_dashboard_by_key('12345');
   r:=(d->'management'->>'placement_revision')::bigint;
   p:='[{"studentId":"2101","roomId":"a/floor-3/right/0","bedIndex":1}]';
   next_r:=public.set_dormitory_manual_assignments_by_key('12345',p,r);
@@ -32,7 +39,7 @@ begin
   update public.student_surveys set updated_at=updated_at where false;
   rejected:=false;begin perform public.set_dormitory_manual_assignments_by_key('12345',p,r);exception when sqlstate '40001' then rejected:=true;end;
   if not rejected then raise exception 'Survey revision did not invalidate stale placement';end if;
-  perform public.save_dormitory_layout_by_key('12345','[{"id":"grid","name":"검증용","diningSide":"none","floors":[{"id":"f","floor":2,"grid":{"rows":1,"cols":2,"spaces":[{"id":"room","kind":"room","number":"201","grade":2,"capacity":3,"row":0,"col":0,"rowSpan":1,"colSpan":1},{"id":"hall","kind":"corridor","row":0,"col":1,"rowSpan":1,"colSpan":1}]}}]}]');
+  perform public.save_dormitory_layout_by_key('12345','[{"id":"grid","name":"검증용","diningSide":"none","genderPolicy":"male","floors":[{"id":"f","floor":2,"grid":{"rows":1,"cols":2,"spaces":[{"id":"room","kind":"room","number":"201","grade":2,"capacity":3,"row":0,"col":0,"rowSpan":1,"colSpan":1},{"id":"hall","kind":"corridor","row":0,"col":1,"rowSpan":1,"colSpan":1}]}}]}]');
   if (select count(*) from public.roomfit_assignable_rooms())<>1 then raise exception 'Grid facilities became assignable rooms';end if;
   r:=(public.get_dormitory_dashboard_by_key('12345')->'management'->>'placement_revision')::bigint;
   perform public.set_dormitory_manual_assignments_by_key('12345','[{"studentId":"2101","roomId":"grid/f/room","bedIndex":2}]',r);

@@ -45,6 +45,7 @@ export default function StudentApplicationPage() {
     const { data: receipt, error } = await supabase.rpc("submit_student_survey", { p_survey: {
       student_id: submittedStudentId,
       student_name: submittedName,
+      reported_gender: data.get("reportedGender"),
       grade: Number(submittedStudentId.charAt(0)),
       wake_time: data.get("wakeTime"),
       sleep_time: data.get("sleepTime"),
@@ -91,6 +92,7 @@ export default function StudentApplicationPage() {
         <div className="grid two-columns">
           <label><span>학번 <b className="required-star">*</b></span><input name="studentId" inputMode="numeric" pattern="[1-3][1-9](0[1-9]|[12][0-9]|30)" placeholder="예: 2602" required maxLength={4} title="학년·반·번호 순서의 네 자리 학번을 입력하세요." value={studentId} onChange={(event) => setStudentId(event.target.value.replace(/\D/g, "").slice(0, 4))} /><small>{grade}</small></label>
           <label><span>이름 <b className="required-star">*</b></span><input name="name" placeholder="이름 입력" required maxLength={30} /></label>
+          <label><span>기숙사 배정 성별 <b className="required-star">*</b></span><select name="reportedGender" defaultValue="unknown" required><option value="unknown">관리자 확인 필요</option><option value="male">남학생</option><option value="female">여학생</option></select><small>관리자가 확인하기 전에는 배정되지 않습니다. 기존 확인 정보와 다른 입력은 재확인합니다.</small></label>
         </div>
       </section>
       <section className="form-section">

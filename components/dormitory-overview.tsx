@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase/client";
 import { useAdminRealtime } from "@/lib/supabase/use-admin-realtime";
 import { buildDormitoryView, type SeparationRequest, type FinalAssignment } from "@/lib/dormitory-view";
 import { RoomReasons } from "./room-reasons";
+import type { GenderProfile } from "@/lib/gender";
 import { gridFromLegacyFloor, type DormLayout, type ManualAssignment } from "@/lib/dormitory-layout";
 import { spaceNames } from "@/lib/floor-grid";
 import type { SurveyRow } from "@/lib/student-roster";
@@ -15,6 +16,7 @@ import { hasDetailedHabits } from "@/lib/roommate-matching";
 
 type Snapshot = {
   surveys: SurveyRow[]; avoidance_requests?: SeparationRequest[];
+  gender_profiles?: GenderProfile[];
   school: { class_count: number; students_per_class: number; room_capacity: number };
   management: { layout: DormLayout | null; manual_assignments: ManualAssignment[]; include_defaults: boolean; final_assignment?: FinalAssignment | null };
 };
@@ -74,6 +76,7 @@ export function DormitoryOverview() {
     manualAssignments: current.management.manual_assignments ?? [],
     includeDefaults: current.management.include_defaults,
     testEnabled, avoidanceRequests: current.avoidance_requests, finalAssignment: current.management.final_assignment,
+    genderProfiles:current.gender_profiles??[],
   }) : null, [current, testEnabled]);
   const view = isAuthenticated ? privateView : publicView;
 
@@ -93,11 +96,12 @@ export function DormitoryOverview() {
     {error && <p className="notice error" role="alert">{error}{view && " 아래에는 마지막으로 불러온 배정이 표시됩니다."}</p>}
     {!view ? <p className="overview-loading" role="status">{error ? "배정 정보를 확인할 수 없습니다." : "배정 정보를 불러오는 중입니다."}</p> : <>
       <p className="overview-final-state">{view.finalizedAt ? "최종 확정 배정 · " + new Date(view.finalizedAt).toLocaleString("ko-KR", {timeZone:"Asia/Seoul"}) : "현재 임시 배정"} · <Link href="/result">내 점수와 선정 이유 확인</Link></p>
+      {view.genderReviewRequired&&<p className="notice warning">기존 확정 기록의 성별 검증이 필요합니다. 원본은 보존되며, 확인되지 않은 자리는 현재 배정에서 제외됩니다.</p>}
       <div className="overview-metrics" aria-label="현재 배정 요약">
         <article><span>설문 접수</span><strong>{view.roster.receivedStudents.length}<small>명</small></strong><p>전체 명단 {view.schoolRosterSize}명</p></article>
         <article><span>배정 인원</span><strong>{view.assignedCount}<small>명</small></strong><p>{view.occupiedRooms}개 호실 사용 중</p></article>
         <article><span>빈자리</span><strong>{view.totalBeds - view.assignedCount}<small>자리</small></strong><p>전체 수용 {view.totalBeds}명</p></article>
-        <article><span>대기·확인 필요</span><strong>{view.waitingCount}<small>명</small></strong><p>자리·명단·분리 조건 확인</p></article>
+        <article><span>대기·확인 필요</span><strong>{view.waitingCount}<small>명</small></strong><p>성별·자리·명단·분리 조건 확인</p></article>
       </div>
       <div className="overview-map-panel">
         <div className="overview-map-toolbar"><div className="overview-filters"><label><span>건물</span><select value={building?.id ?? ""} onChange={event=>{setBuildingId(event.target.value);setSelectedRooms({});}}>{buildings.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div><p>{floors.length}개 층 · {buildingRooms.length}개 방 · {buildingRooms.reduce((sum,room)=>sum+room.students.length,0)}/{buildingRooms.reduce((sum,room)=>sum+room.capacity,0)}명</p><Link className="help-link" href="/admin">배정 조정 <Icon name="arrow" size={15}/></Link></div>
